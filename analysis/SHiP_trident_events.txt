@@ -1,0 +1,122 @@
+Total events for SHiP (mass: 3000.0 kg, area: 1600 cm^2, exposure: 2e+20 POT or fb^-1):
+
+nue_nuebar+nue_e_e_coh:  7.16e+01
+
+nue_nuebar+nue_e_e_incoh:  3.11e+00
+
+nue_nuebar+nue_mu_mu_coh:  4.11e+00
+
+nue_nuebar+nue_mu_mu_incoh:  5.61e-01
+
+nue_nuebar+nue_tau_tau_coh:  2.17e-04
+
+nue_nuebar+nue_tau_tau_incoh:  2.30e-02
+
+nue_nuebar+numu_mu_e_coh:  5.01e+01
+
+nue_nuebar+numu_mu_e_incoh:  4.60e+00
+
+nue_nuebar+nutau_tau_e_coh:  4.58e-01
+
+nue_nuebar+nutau_tau_e_incoh:  7.29e-01
+
+numu_numubar+nue_e_mu_coh:  2.11e+02
+
+numu_numubar+nue_e_mu_incoh:  1.22e+01
+
+numu_numubar+numu_e_e_coh:  4.43e+01
+
+numu_numubar+numu_e_e_incoh:  1.65e+00
+
+numu_numubar+numu_mu_mu_coh:  3.45e+01
+
+numu_numubar+numu_mu_mu_incoh:  5.89e+00
+
+numu_numubar+numu_tau_tau_coh:  3.71e-04
+
+numu_numubar+numu_tau_tau_incoh:  3.56e-02
+
+numu_numubar+nutau_tau_mu_coh:  2.93e-01
+
+numu_numubar+nutau_tau_mu_incoh:  1.15e+00
+
+nutau_nutaubar+nue_e_tau_coh:  1.01e-01
+
+nutau_nutaubar+nue_e_tau_incoh:  1.29e-01
+
+nutau_nutaubar+numu_mu_tau_coh:  4.06e-02
+
+nutau_nutaubar+numu_mu_tau_incoh:  1.15e-01
+
+nutau_nutaubar+nutau_e_e_coh:  1.45e+00
+
+nutau_nutaubar+nutau_e_e_incoh:  6.19e-02
+
+nutau_nutaubar+nutau_mu_mu_coh:  3.79e-01
+
+nutau_nutaubar+nutau_mu_mu_incoh:  5.21e-02
+
+nutau_nutaubar+nutau_tau_tau_coh:  4.99e-05
+
+nutau_nutaubar+nutau_tau_tau_incoh:  5.83e-03
+
+diff_nue_nuebar+nue_e_e_coh:  7.16e+01
+
+diff_nue_nuebar+nue_e_e_incoh:  3.11e+00
+
+diff_nue_nuebar+nue_mu_mu_coh:  4.11e+00
+
+diff_nue_nuebar+nue_mu_mu_incoh:  5.61e-01
+
+diff_nue_nuebar+nue_tau_tau_coh:  2.17e-04
+
+diff_nue_nuebar+nue_tau_tau_incoh:  2.30e-02
+
+diff_nue_nuebar+numu_mu_e_coh:  5.01e+01
+
+diff_nue_nuebar+numu_mu_e_incoh:  4.60e+00
+
+diff_nue_nuebar+nutau_tau_e_coh:  4.58e-01
+
+diff_nue_nuebar+nutau_tau_e_incoh:  7.29e-01
+
+diff_numu_numubar+nue_e_mu_coh:  2.11e+02
+
+diff_numu_numubar+nue_e_mu_incoh:  1.22e+01
+
+diff_numu_numubar+numu_e_e_coh:  4.43e+01
+
+diff_numu_numubar+numu_e_e_incoh:  1.65e+00
+
+diff_numu_numubar+numu_mu_mu_coh:  3.45e+01
+
+diff_numu_numubar+numu_mu_mu_incoh:  5.89e+00
+
+diff_numu_numubar+numu_tau_tau_coh:  3.71e-04
+
+diff_numu_numubar+numu_tau_tau_incoh:  3.56e-02
+
+diff_numu_numubar+nutau_tau_mu_coh:  2.93e-01
+
+diff_numu_numubar+nutau_tau_mu_incoh:  1.15e+00
+
+diff_nutau_nutaubar+nue_e_tau_coh:  1.01e-01
+
+diff_nutau_nutaubar+nue_e_tau_incoh:  1.29e-01
+
+diff_nutau_nutaubar+numu_mu_tau_coh:  4.06e-02
+
+diff_nutau_nutaubar+numu_mu_tau_incoh:  1.15e-01
+
+diff_nutau_nutaubar+nutau_e_e_coh:  1.45e+00
+
+diff_nutau_nutaubar+nutau_e_e_incoh:  6.19e-02
+
+diff_nutau_nutaubar+nutau_mu_mu_coh:  3.79e-01
+
+diff_nutau_nutaubar+nutau_mu_mu_incoh:  5.21e-02
+
+diff_nutau_nutaubar+nutau_tau_tau_coh:  4.99e-05
+
+diff_nutau_nutaubar+nutau_tau_tau_incoh:  5.83e-03
+

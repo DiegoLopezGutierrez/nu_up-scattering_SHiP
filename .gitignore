@@ -1,2 +1,5 @@
 *.out
 .DS_Store
+analysis/__pycache__/
+__pycache__/
+*.pyc
