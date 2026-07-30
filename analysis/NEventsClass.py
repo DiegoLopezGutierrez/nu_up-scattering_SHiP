@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 # helper functions
 def interaction_events(flux: dict, cross_section: np.ndarray, area: float, detector_mass: float, target_mass: float) -> np.ndarray:
@@ -162,3 +163,20 @@ class NEvents:
             for process in self.events:
                 total = self.events[process]['total']
                 print(process + ':  ' + f'{total:.2e}' + '\n', file=file_object)
+
+    def save_to_pandas(self, filename: str, index: bool = True) -> None:
+        event_data = []
+        for process in self.events:
+            # extract flux and xsec label
+            first_split = process.split('+')
+            # extract trident, scattering and target information
+            second_split = first_split[1].split('_')
+            total = self.events[process]['total']
+            event_data.append({'flux':first_split[0],
+                                'trident':second_split[0]+'_'+second_split[1]+'_'+second_split[2],
+                                'scattering':second_split[3],
+                                'target':second_split[4],
+                                'total':f'{total:.2e}'})
+        df = pd.DataFrame(event_data)
+        df.to_csv(filename, index=index)
+        self.df = df
