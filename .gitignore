@@ -3,3 +3,9 @@
 analysis/__pycache__/
 __pycache__/
 *.pyc
+
+# Geant4 target simulation build artifacts / run outputs
+geant4/build/
+geant4/*.root
+geant4/n_pot.txt
+geant4/pythia_target_mpi_*.dat
