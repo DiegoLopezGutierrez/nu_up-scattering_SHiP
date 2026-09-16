@@ -30,12 +30,22 @@ HNLProduction::HNLProduction()
   // above nothing up to the B+ -> tau+ N threshold. Edit freely -- this
   // list is re-used for every produced meson, it does not require
   // re-running the (expensive) Geant4/Pythia8 cascade.
-  const int nPoints = 30;
+
+  // implementing a finer linearly-spaced grid
+  const int nPoints = 100;
   const G4double mMin = 0.02, mMax = 5.0;
   for (int i = 0; i < nPoints; ++i) {
-    G4double logM = std::log(mMin) + i * (std::log(mMax) - std::log(mMin)) / (nPoints - 1);
-    massGrid.push_back(std::exp(logM));
+    G4double mGrid = mMin + i * (mMax - mMin) / (nPoints - 1);
+    massGrid.push_back(mGrid);
   }
+
+  // coarser log-spaced grid
+  // const int nPoints = 30;
+  // const G4double mMin = 0.02, mMax = 5.0;
+  // for (int i = 0; i < nPoints; ++i) {
+  //   G4double logM = std::log(mMin) + i * (std::log(mMax) - std::log(mMin)) / (nPoints - 1);
+  //   massGrid.push_back(std::exp(logM));
+  // }
 
   // Meson inputs. Decay constants and CKM elements are the standard
   // PDG/FLAG values used throughout the HNL-phenomenology literature
@@ -105,9 +115,9 @@ G4LorentzVector HNLProduction::SampleHNLKinematics(const G4LorentzVector& labMom
   const G4double phi = CLHEP::twopi * G4UniformRand();
 
   G4LorentzVector pN_rest(pStar * sinTheta * std::cos(phi),
-                           pStar * sinTheta * std::sin(phi),
-                           pStar * cosTheta,
-                           eStarN);
+                          pStar * sinTheta * std::sin(phi),
+                          pStar * cosTheta,
+                          eStarN);
 
   // Boost from the meson rest frame into the lab frame.
   const G4ThreeVector beta = labMomentum.boostVector();
@@ -117,9 +127,9 @@ G4LorentzVector HNLProduction::SampleHNLKinematics(const G4LorentzVector& labMom
 }
 
 void HNLProduction::ProcessMeson(G4int parentPDG,
-                                  const G4LorentzVector& labMomentum,
-                                  const G4ThreeVector& vertexPosition,
-                                  G4double vertexWeight)
+                                const G4LorentzVector& labMomentum,
+                                const G4ThreeVector& vertexPosition,
+                                G4double vertexWeight)
 {
   const MesonInfo* h = FindMeson(parentPDG);
   if (!h) return;
