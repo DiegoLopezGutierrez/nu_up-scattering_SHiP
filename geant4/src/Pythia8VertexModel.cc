@@ -24,8 +24,13 @@ namespace {
   // sampler becomes numerically unstable, and the true charm/beauty
   // yield is negligible anyway -- vertices below the floor are treated
   // as producing no charm/beauty at all (see ProcessVertex).
-  const std::array<G4double, 6> kPoolEnergiesGeV =
-      {400., 250., 150., 100., 60., 35.};
+
+  // implementing finer linearly-spaced pool energies grid
+  const std::array<G4double, 15> kPoolEnergiesGeV = 
+      {400., 373., 347., 321., 295., 269., 243., 217., 191., 165., 139., 113., 87., 61., 35.};
+
+  // const std::array<G4double, 6> kPoolEnergiesGeV =
+  //     {400., 250., 150., 100., 60., 35.};
 
   // Fixed approximation for the total proton-proton inelastic cross
   // section [mb], used only as the normalization denominator for the
