@@ -15,8 +15,14 @@ namespace {
 
   // Representative lab energies [GeV] of the pool. The floor is
   // set at 35 GeV lab (sqrt(s_NN) ~ 8.2 GeV), right above ccbar threshold
-  const std::array<G4double, 15> kPoolEnergiesGeV = 
-      {400., 373., 347., 321., 295., 269., 243., 217., 191., 165., 139., 113., 87., 61., 35.};
+  const std::array<G4double, 74> kPoolEnergiesGeV = 
+  {400., 395., 390., 385., 380., 375., 370., 365., 360., 355., 350., 345., 340., 335., 330.,
+   325., 320., 315., 310., 305., 300., 295., 290., 285., 280., 275., 270., 265., 260.,
+   255., 250., 245., 240., 235., 230., 225., 220., 215., 210., 205., 200., 195., 190.,
+   185., 180., 175., 170., 165., 160., 155., 150., 145., 140., 135., 130., 125., 120.,
+   115., 110., 105., 100.,  95.,  90.,  85.,  80.,  75.,  70.,  65.,  60.,  55.,  50.,
+   45.,  40.,  35.};
+  // {400., 373., 347., 321., 295., 269., 243., 217., 191., 165., 139., 113., 87., 61., 35.};
 
   // Fixed approximation for the total proton-proton inelastic cross section [mb]
   constexpr G4double kSigmaInelasticMb = 30.0;
@@ -175,124 +181,19 @@ Pythia8VertexModel::Pythia8VertexModel(HNLProduction* hnlProduction, G4int /*tar
       ccbar_on = true;
     }
 
-    // // nucleon-nucleus collision modelled as proton-proton with fixed
-    // // incoming proton energy.
-    // pythia->readString("Beams:frameType = 3");
-    // pythia->readString("Beams:idA = 2212");
-    // pythia->readString("Beams:idB = 2212");
-    // pythia->settings.parm("Beams:pzA", eLab);
-    // pythia->readString("Beams:pzB = 0.");
-
-    // // Explicit hard-QCD charm/beauty pair production only 
-    // pythia->readString("HardQCD:hardccbar = on");
-    // pythia->readString("HardQCD:hardbbbar = on");
-
-    // pythia->readString("HadronLevel:Decay = on");
-
-    // pythia->readString("Print:quiet = on");
-    // pythia->readString("Next:numberCount = 0");
-    // pythia->readString("Check:epTolErr = 0.1");
-
-    // // Implement FTFT tune from 2608.29076
-    // // note: technically, bbbar should only be modified with the K-factor but
-    // // testing shows that the fragmentation and MPI parameters do not affect
-    // // bbbar yields enough to warrant a separate Pythia instance.
-    // pythia->readString("StringZ:aLund = 2.0");
-    // pythia->readString("StringZ:bLund = 0.2");
-    // pythia->readString("StringZ:rFactC = 2.0");
-
-    // pythia->readString("MultipartonInteractions:ecmRef = 30");
-    // pythia->readString("MultipartonInteractions:pT0Ref = 0.69");
-    // pythia->readString("MultipartonInteractions:ecmPow = 0.266");
-
-    // pythia->readString("BeamRemnants:halfMassForKT = 1.21");
-
-    // Cache the (expensive) multiparton-interactions initialization across runs
-    // std::ostringstream mpiFile;
-    // mpiFile << "pythia_target_mpi_" << static_cast<int>(eLab) << "GeV.dat";
-    // pythia->readString("MultipartonInteractions:reuseInit = 3");
-    // pythia->readString("MultipartonInteractions:initFile = " + mpiFile.str());
-
-    // if (!pythia->init()) {
-    //   G4Exception("Pythia8VertexModel::Pythia8VertexModel", "Pythia8InitFailed",
-    //                FatalException, ("Pythia8 failed to initialize pool instance at "
-    //                                  + std::to_string(eLab) + " GeV").c_str());
-    // }
-
     G4int nCCEvents = 0, nBBEvents = 0;
     G4double nD = 0, nDs = 0, nB = 0, nBc = 0;
 
-    // Burn-in run to obtain a stable sigma(ccbar+bbbar) estimate; the
-    // events themselves are discarded.
+    // Burn-in run to obtain a stable cross sections
     for (int i = 0; i < kBurnInEvents; ++i) {
         if ((ccbar_on && !pythiaCC->next()) || (bbbar_on && !pythiaBB->next())) continue;
 
         nCCEvents++;
         nBBEvents++;
 
-        if (ccbar_on) {
-          ProcessCCBar(pythiaCC.get(), nD, nDs);
-            // const Pythia8::Event& eventCC = pythiaCC->event;
-            // for (int j = 1; j < eventCC.size(); ++j) { // iterates over all particles in event
-            //     const int absId = std::abs(eventCC[j].id());
-            //     bool isHeavyFlavor = false;
-            //     std::vector<double> particle;
-            //     std::string name;
+        if (ccbar_on) { ProcessCCBar(pythiaCC.get(), nD, nDs); }
 
-            //     for (const auto& pdg : kHeavyFlavorPDG) {
-            //         if (absId == pdg) { 
-            //             isHeavyFlavor = true; 
-            //             name = pdg_to_str[eventCC[j].id()];
-            //             if (absId == 411) {
-            //                 int d1 = eventCC[j].daughter1();
-            //                 if (abs(eventCC[d1].id()) != 411) {
-            //                     Dpmcounter++;
-            //                 }
-            //             }
-            //             if (absId == 431) {
-            //                 int d1 = eventCC[j].daughter1();
-            //                 if (abs(eventCC[d1].id()) != 431) {
-            //                     Dspmcounter++;
-            //                 }
-            //             }
-            //             break;
-            //         }
-            //     }
-            //     if (!isHeavyFlavor) continue;
-            // }
-        }
-
-        if (bbbar_on) {
-          ProcessBBBar(pythiaBB.get(), nB, nBc);
-            // const Pythia8::Event& eventBB = pythiaBB->event;
-            // for (int j = 1; j < eventBB.size(); ++j) { // iterates over all particles in event
-            //     const int absId = std::abs(eventBB[j].id());
-            //     bool isHeavyFlavor = false;
-            //     std::vector<double> particle;
-            //     std::string name;
-
-            //     for (const auto& pdg : kHeavyFlavorPDG) {
-            //         if (absId == pdg) { 
-            //             isHeavyFlavor = true; 
-            //             name = pdg_to_str[eventBB[j].id()];
-            //             if (absId == 521) {
-            //                 int d1 = eventBB[j].daughter1();
-            //                 if (abs(eventBB[d1].id()) != 521) {
-            //                     Bpmcounter++;
-            //                 }
-            //             }
-            //             if (absId == 541) {
-            //                 int d1 = eventBB[j].daughter1();
-            //                 if (abs(eventBB[d1].id()) != 541) {
-            //                     Bcpmcounter++;
-            //                 }
-            //             }
-            //             break;
-            //         }
-            //     }
-            //     if (!isHeavyFlavor) continue;
-            // }
-        }
+        if (bbbar_on) { ProcessBBBar(pythiaBB.get(), nB, nBc); }
     }
 
     G4double sigma_ccbar = 0, sigma_bbbar = 0;
@@ -314,46 +215,6 @@ Pythia8VertexModel::Pythia8VertexModel(HNLProduction* hnlProduction, G4int /*tar
       sigmaBc = sigma_bbbar * fracBc * K_beauty; // FTFT requires rescaling the cross sections by corresponding K-factors
     }
 
-    // if ((ccFlag) && (Dpmcounter != 0 || Dspmcounter != 0)) {
-    //     // fracD  = Dpmcounter  / double(Dpmcounter + Dspmcounter);
-    //     fracD  = Dpmcounter / nCCEvents;
-    //     // fracDs = 1.0 - fracD;
-    //     fracDs = Dspmcounter / nCCEvents;
-    //     sigmaD  = sigma_cc * fracD * K_charm; // FTFT requires rescaling the cross sections by corresponding K-factors
-    //     sigmaDs = sigma_cc * fracDs * K_charm; // FTFT requires rescaling the cross sections by corresponding K-factors
-
-    //     // calculate yields
-    //     yieldD = sigmaD / kSigmaInelasticMb;
-    //     yieldDs = sigmaDs / kSigmaInelasticMb;
-    // }
-
-    // if ((bbFlag) && (Bpmcounter != 0 || Bcpmcounter != 0)) {
-    //     // fracB  = Bpmcounter  / double(Bpmcounter + Bcpmcounter);   // still noisy at low stats, but a ratio, not an absolute rate
-    //     // fracBc = 1.0 - fracB;
-    //     fracB  = Bpmcounter  / nBBEvents;   // still noisy at low stats, but a ratio, not an absolute rate
-    //     fracBc = Bcpmcounter / nBBEvents;
-    //     sigmaB  = sigma_bb * fracB * K_beauty; // FTFT requires rescaling the cross sections by corresponding K-factors
-    //     sigmaBc = sigma_bb * fracBc * K_beauty; // FTFT requires rescaling the cross sections by corresponding K-factors
-
-    //     // calculate yields
-    //     yieldB = sigmaB / kSigmaInelasticMb;
-    //     yieldBc = sigmaBc / kSigmaInelasticMb;
-    // }
-
-    // if (nD != 0 || nDs != 0) {
-    //     fracD  = nD  / double(nD + nDs);
-    //     fracDs = 1.0 - fracD;
-    //     sigmaD  = sigma_ccbar * fracD * K_charm;
-    //     sigmaDs = sigma_ccbar * fracDs * K_charm;
-    // }
-
-    // if (nB != 0 || nBc != 0) {
-    //     fracB  = nB  / double(nB + nBc);
-    //     fracBc = 1.0 - fracB;
-    //     sigmaB  = sigma_bbbar * fracB * K_beauty;
-    //     sigmaBc = sigma_bbbar * fracBc * K_beauty;
-    // }
-    // fSigmaHardMb.push_back(pythia->info.sigmaGen());
     fSigmaDMb.push_back(sigmaD);
     fSigmaDsMb.push_back(sigmaDs);
     fSigmaBMb.push_back(sigmaB);

@@ -31,8 +31,8 @@ HNLProduction::HNLProduction()
   // list is re-used for every produced meson, it does not require
   // re-running the (expensive) Geant4/Pythia8 cascade.
 
-  // implementing a finer linearly-spaced grid
-  const int nPoints = 100;
+  // implementing a finer linearly-spaced grid; every 10 MeV
+  const int nPoints = 499;
   const G4double mMin = 0.02, mMax = 5.0;
   for (int i = 0; i < nPoints; ++i) {
     G4double mGrid = mMin + i * (mMax - mMin) / (nPoints - 1);
