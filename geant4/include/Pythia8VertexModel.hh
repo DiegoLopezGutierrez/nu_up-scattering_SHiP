@@ -84,15 +84,30 @@ class Pythia8VertexModel
     void ProcessVertex(G4int projectilePDG,
                         const G4LorentzVector& labMomentum,
                         const G4ThreeVector& vertexPosition);
+    void ProcessCCBar(Pythia8::Pythia* pythia, 
+                      G4double& nD,
+                      G4double& nDs);
+    void ProcessBBBar(Pythia8::Pythia* pythia, 
+                      G4double& nB,
+                      G4double& nBc);
+    void InitPythiaCCBar(Pythia8::Pythia* pythia,
+                         const G4double& eLab);
+    void InitPythiaBBBar(Pythia8::Pythia* pythia,
+                         const G4double& eLab);
 
   private:
     // Representative lab energies [GeV] of the pool, ascending.
     std::vector<G4double> fPoolEnergies;
-    std::vector<std::unique_ptr<Pythia8::Pythia>> fPool;
+    std::vector<std::unique_ptr<Pythia8::Pythia>> fPoolCC;
+    std::vector<std::unique_ptr<Pythia8::Pythia>> fPoolBB;
 
     // sigma(ccbar+bbbar) [mb] for each pool instance, from Info::sigmaGen()
     // after a short burn-in run at construction time.
-    std::vector<G4double> fSigmaHardMb;
+    // std::vector<G4double> fSigmaHardMb;
+    std::vector<G4double> fSigmaDMb;
+    std::vector<G4double> fSigmaDsMb;
+    std::vector<G4double> fSigmaBMb;
+    std::vector<G4double> fSigmaBcMb;
 
     HNLProduction* fHNLProduction;
 
