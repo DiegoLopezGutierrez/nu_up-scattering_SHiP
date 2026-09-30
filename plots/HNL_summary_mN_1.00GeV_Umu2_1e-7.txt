@@ -1,0 +1,44 @@
+HNL flux summary
+================
+
+HNL parameters
+--------------
+Requested mass [GeV]:            1
+Nearest simulated benchmark [GeV]: 1
+Mixing: Ue2=0, Umu2=1e-07, Utau2=0
+Total decay width Gamma_N [GeV]: 3.85622e-20
+
+Decay channels included (kinematically open at this mass and mixing)
+----------------------------------------------------------------------
+  N -> mu- nu_e e+ (CC)
+  N -> nu_mu e- e+ (NC)
+  N -> nu_mu mu- mu+ (NC)
+  N -> nu_mu nu_e nu_ebar (invisible)
+  N -> nu_mu nu_mu nu_mubar (invisible)
+  N -> nu_mu nu_tau nu_taubar (invisible)
+  N -> mu- u dbar (hadronic, quark-level CC)
+  N -> mu- u sbar (hadronic, quark-level CC)
+  N -> mu- c dbar (hadronic, quark-level CC)
+  N -> mu- c sbar (hadronic, quark-level CC)
+  N -> nu_mu u ubar (hadronic, quark-level NC)
+  N -> nu_mu d dbar (hadronic, quark-level NC)
+  N -> nu_mu s sbar (hadronic, quark-level NC)
+
+Decay volume geometry
+----------------------
+Distance from target [m]: 33.5
+Half-width (x) [m]:       0.5
+Half-height (y) [m]:      1.35
+Cross-sectional area [m^2]: 2.7
+
+Protons on target
+-----------------
+Simulated (MC normalization) POT: 30000
+Requested (scaling) POT:          6e+20
+
+HNL yields (light + heavy parents, integrated over dPhi_N/dE_N)
+----------------------------------------------------------------
+Flux at target [N/POT]:        3.54972e-13
+Flux at decay volume [N/POT]:  1.15415e-13
+Total HNLs produced at target for 6e+20 POT: 2.12983e+08
+Total HNLs detected at decay volume for 6e+20 POT: 6.92488e+07
