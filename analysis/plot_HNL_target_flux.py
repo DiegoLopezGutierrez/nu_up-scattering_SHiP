@@ -22,11 +22,13 @@ without needing a working ROOT/Cling installation.
 """
 
 import argparse
-from zlib import Z_DEFAULT_COMPRESSION
+from zlib import Z_DEFAULT_COMPRESSION, Z_DEFAULT_STRATEGY
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+from matplotlib.patches import Rectangle
+from matplotlib.colors import LogNorm
 from scipy import integrate
 import uproot
 
@@ -94,9 +96,14 @@ LIGHT_PARENTS = (211, 321)
 HEAVY_PARENTS = (411, 431, 521, 541)
 
 # SHiP decay volume geometry, all in mm.
-Z_DECAY_VOLUME = 33.5e3  # distance from the target (z=0) to the decay volume
-X_DECAY_VOLUME = 0.5e3   # half width
-Y_DECAY_VOLUME = 1.35e3  # half height
+# Z_DECAY_VOLUME = 33.5e3  # distance from the target (z=0) to the decay volume
+# X_DECAY_VOLUME = 0.5e3   # half width
+# Y_DECAY_VOLUME = 1.35e3  # half height
+
+# Xiaolin's parameters
+Z_DECAY_VOLUME = 35e3 # located 35 m downstream from target
+X_DECAY_VOLUME = 2e3 # width of 4 m
+Y_DECAY_VOLUME = 3e3 # height of 6 m
 
 G_F = 1.1663787e-5  # Fermi constant [GeV^-2]
 
@@ -658,6 +665,28 @@ def plot_flux_vs_mass(data: dict, n_pot: float, Ue2: float, Umu2: float, Utau2: 
     fig.savefig(outfile, dpi=100)
 
 
+def _propagate_to_decay_volume(data: dict, in_bin: np.ndarray):
+    """
+    Extrapolate each selected HNL's production vertex to the decay-volume
+    entrance plane (z = Z_DECAY_VOLUME) assuming straight-line propagation,
+    returning (vx_DV, vy_DV, forward_going) [mm, mm, bool]. vx_DV/vy_DV are
+    only physically meaningful where forward_going (pz_N > 0) is True -- a
+    backward/transverse-going HNL can never reach a downstream decay
+    volume, so callers must mask on forward_going before using them.
+    """
+    px_N = data["px_N"][in_bin]  # GeV
+    py_N = data["py_N"][in_bin]  # GeV
+    pz_N = data["pz_N"][in_bin]  # GeV
+    vx = data["vx"][in_bin]  # mm
+    vy = data["vy"][in_bin]  # mm
+    vz = data["vz"][in_bin]  # mm
+
+    forward_going = pz_N > 0
+    vx_DV = vx + (Z_DECAY_VOLUME - vz) * px_N / pz_N  # mm
+    vy_DV = vy + (Z_DECAY_VOLUME - vz) * py_N / pz_N  # mm
+    return vx_DV, vy_DV, forward_going
+
+
 def energy_spectrum_table(data: dict, n_pot: float, target_mass: float,
                            Ue2: float, Umu2: float, Utau2: float):
     """
@@ -692,18 +721,9 @@ def energy_spectrum_table(data: dict, n_pot: float, target_mass: float,
     spectra["heavy"] = diff_flux(np.isin(parent, HEAVY_PARENTS))
 
     # decay volume flux implementation
-    px_N = data["px_N"][in_bin] # GeV
-    py_N = data["py_N"][in_bin] # GeV
-    pz_N = data["pz_N"][in_bin] # GeV
-
-    vx = data["vx"][in_bin] # mm 
-    vy = data["vy"][in_bin] # mm
-    vz = data["vz"][in_bin] # mm
-
-    # HNL vertex at decay volume. Undefined/meaningless for pz_N <= 0 --
-    # excluded below via forward_going before it can be used.
-    vx_DV = vx + (Z_DECAY_VOLUME - vz) * px_N / pz_N  # mm
-    vy_DV = vy + (Z_DECAY_VOLUME - vz) * py_N / pz_N  # mm
+    pz_N = data["pz_N"][in_bin]  # GeV, needed below for the proper-time calc
+    vz = data["vz"][in_bin]  # mm, needed below for the proper-time calc
+    vx_DV, vy_DV, forward_going = _propagate_to_decay_volume(data, in_bin)
 
     # apply geometrical cut ('and'/'or' don't broadcast over numpy arrays;
     # need the elementwise '&' operator here). forward_going is required
@@ -711,7 +731,6 @@ def energy_spectrum_table(data: dict, n_pot: float, target_mass: float,
     # physically meaningful (a backward/transverse-going HNL can never
     # reach a downstream decay volume), and the transverse coordinates can
     # spuriously fall inside the acceptance window by coincidence.
-    forward_going = pz_N > 0
     x_acceptance = X_DECAY_VOLUME > np.abs(vx_DV)
     y_acceptance = Y_DECAY_VOLUME > np.abs(vy_DV)
     geom_acceptance = forward_going & x_acceptance & y_acceptance
@@ -807,6 +826,104 @@ def plot_energy_spectrum(data: dict, n_pot: float, target_mass: float,
     return closest_mass, bins, spectra, spectra_DV
 
 
+def _masked_hist2d(ax, x: np.ndarray, y: np.ndarray, bins: int, hist_range: list):
+    """
+    2D histogram with zero-count bins masked out, so they render as
+    transparent (background shows through) rather than being painted by
+    the colormap. Plain ax.hist2d(..., norm=LogNorm()) looks fine when the
+    populated bins span a range of counts, but when every populated bin
+    happens to have the *same* count (common for sparse data and/or fine
+    binning, e.g. a zoomed-in inset) LogNorm's auto-scaled vmin == vmax,
+    and matplotlib fills the *entire* axes -- including empty bins -- with
+    one flat color instead of leaving them blank. Masking zero bins here
+    sidesteps that degenerate-normalization case entirely.
+    """
+    counts, xedges, yedges = np.histogram2d(x, y, bins=bins, range=hist_range)
+    masked_counts = np.ma.masked_equal(counts, 0)
+    cmap = plt.get_cmap("viridis").copy()
+    cmap.set_bad(alpha=0)
+    vmax = max(int(masked_counts.max()), 2) if masked_counts.count() else 2
+    return ax.pcolormesh(xedges, yedges, masked_counts.T, cmap=cmap, norm=LogNorm(vmin=1, vmax=vmax))
+
+
+def plot_decay_volume_xy(data: dict, target_mass: float, outfile: str, n_bins: int = 100) -> None:
+    """
+    2D histogram of the (x, y) position of every forward-going HNL
+    (pz_N > 0) at the mass grid point closest to target_mass, extrapolated
+    to the decay-volume entrance plane (z = Z_DECAY_VOLUME) via the same
+    straight-line propagation used for the survival probability. Colored by
+    raw simulated counts, not flux -- this is a geometric/kinematic
+    diagnostic of the HNL beam's transverse profile at the decay volume,
+    independent of the active-sterile mixing pattern (which only rescales
+    weights, not where a given simulated HNL's trajectory points).
+
+    Includes *all* forward-going HNLs produced at the target, not just the
+    ones that land inside the decay volume -- the overlaid rectangle (the
+    decay volume's actual transverse size, centered at x=y=0) is what shows
+    how much of the beam the fixed-size decay volume geometrically catches.
+    """
+    mass_points = np.unique(data["mN"])
+    closest_mass = mass_points[np.argmin(np.abs(mass_points - target_mass))]
+    in_bin = data["mN"] == closest_mass
+
+    vx_DV, vy_DV, forward_going = _propagate_to_decay_volume(data, in_bin)
+    x_m = vx_DV[forward_going] / 1e3  # mm -> m
+    y_m = vy_DV[forward_going] / 1e3  # mm -> m
+
+    # Data-driven, symmetric view window: wide enough to always show the
+    # decay-volume rectangle with margin, even if the simulated beam
+    # footprint is tighter or much wider than the decay volume itself.
+    half_x = max(2 * X_DECAY_VOLUME / 1e3, np.percentile(np.abs(x_m), 99) if x_m.size else 0.0)
+    half_y = max(2 * Y_DECAY_VOLUME / 1e3, np.percentile(np.abs(y_m), 99) if y_m.size else 0.0)
+
+    fig, ax = plt.subplots(1, 1, figsize=(15, 15), tight_layout=True)
+
+    image = _masked_hist2d(ax, x_m, y_m, n_bins, [[-half_x, half_x], [-half_y, half_y]])
+
+    ax.add_patch(Rectangle(
+        (-X_DECAY_VOLUME / 1e3, -Y_DECAY_VOLUME / 1e3),
+        2 * X_DECAY_VOLUME / 1e3, 2 * Y_DECAY_VOLUME / 1e3,
+        fill=False, edgecolor="#FF2C00", linewidth=3, linestyle="--",
+        label="Decay volume acceptance",
+    ))
+
+    cbar = fig.colorbar(image, ax=ax)
+    cbar.set_label("Simulated HNL counts")
+
+    ax.set_xlabel(r"$x$ at decay volume [m]")
+    ax.set_ylabel(r"$y$ at decay volume [m]")
+    ax.set_title(rf"{{\bf Forward-going HNLs at decay volume}} ($M_N={closest_mass:.3g}$ GeV)")
+    ax.set_aspect("equal")
+    legend_if_any(ax, loc="upper right")
+
+    # Inset: zoomed-in view of the decay-volume acceptance rectangle itself
+    # (the full-range plot above is dominated by the much wider beam
+    # footprint, so the rectangle -- and whatever falls inside it -- would
+    # otherwise be too small to read). View window is a fixed margin around
+    # the rectangle, independent of the outer plot's data-driven range.
+    zoom_half_x = 1.5 * X_DECAY_VOLUME / 1e3
+    zoom_half_y = 1.5 * Y_DECAY_VOLUME / 1e3
+
+    axins = ax.inset_axes([0.60, 0.05, 0.35, 0.35])
+    _masked_hist2d(axins, x_m, y_m, n_bins, [[-zoom_half_x, zoom_half_x], [-zoom_half_y, zoom_half_y]])
+    axins.add_patch(Rectangle(
+        (-X_DECAY_VOLUME / 1e3, -Y_DECAY_VOLUME / 1e3),
+        2 * X_DECAY_VOLUME / 1e3, 2 * Y_DECAY_VOLUME / 1e3,
+        fill=False, edgecolor="#FF2C00", linewidth=2, linestyle="--",
+    ))
+    axins.set_xlim(-zoom_half_x, zoom_half_x)
+    axins.set_ylim(-zoom_half_y, zoom_half_y)
+    axins.set_aspect("equal")
+    axins.set_xticks([])
+    axins.set_yticks([])
+    for spine in axins.spines.values():
+        spine.set_edgecolor("black")
+        spine.set_linewidth(1.5)
+    ax.indicate_inset_zoom(axins, edgecolor="black")
+
+    fig.savefig(outfile, dpi=200)
+
+
 def write_summary_file(outfile: str, target_mass: float, closest_mass: float,
                         Ue2: float, Umu2: float, Utau2: float,
                         n_pot: float, pot: float,
@@ -864,6 +981,11 @@ def write_summary_file(outfile: str, target_mass: float, closest_mass: float,
 
 
 def main():
+    # Declared up front: the --decay-volume-* help strings below read the
+    # current module-level defaults, and Python requires `global` to appear
+    # before any use of the name in this scope.
+    global Z_DECAY_VOLUME, X_DECAY_VOLUME, Y_DECAY_VOLUME
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default="../geant4/build/HNL_target_flux.root",
                          help="Path to the Geant4 output ROOT file.")
@@ -879,12 +1001,32 @@ def main():
                          help="Protons-on-target to scale the total HNL yield by "
                               "(defaults to the simulated POT count from --npot, "
                               "i.e. no additional scaling).")
+    parser.add_argument("--decay-volume-z", type=float, default=None,
+                         help="Distance from the target (z=0) to the decay volume [m] "
+                              f"(default: {Z_DECAY_VOLUME / 1e3:g}).")
+    parser.add_argument("--decay-volume-half-width", type=float, default=None,
+                         help="Decay volume half-width in x [m] "
+                              f"(default: {X_DECAY_VOLUME / 1e3:g}).")
+    parser.add_argument("--decay-volume-half-height", type=float, default=None,
+                         help="Decay volume half-height in y [m] "
+                              f"(default: {Y_DECAY_VOLUME / 1e3:g}).")
     parser.add_argument("--outdir", default="../plots", help="Output directory for plots.")
     parser.add_argument("--breakdown", action="store_true",
                          help="Plot each parent meson species individually instead of "
                               "the aggregated light (pi/K) / heavy (D/Ds/B/Bc) curves.")
     parser.add_argument("--tag", type=str, default=None, help="Tag to append at end of figure names")
     args = parser.parse_args()
+
+    # Decay volume geometry is used as module-level constants throughout
+    # (energy_spectrum_table, _propagate_to_decay_volume,
+    # plot_decay_volume_xy, write_summary_file); override them here, before
+    # any of those run, if the user asked for non-default geometry.
+    if args.decay_volume_z is not None:
+        Z_DECAY_VOLUME = args.decay_volume_z * 1e3
+    if args.decay_volume_half_width is not None:
+        X_DECAY_VOLUME = args.decay_volume_half_width * 1e3
+    if args.decay_volume_half_height is not None:
+        Y_DECAY_VOLUME = args.decay_volume_half_height * 1e3
 
     data, n_pot = load_events(args.root, args.npot)
     pot = args.pot if args.pot is not None else n_pot
@@ -900,6 +1042,7 @@ def main():
         write_summary_file(f"{args.outdir}/HNL_summary_{args.tag}.txt",
                             args.mass, closest_mass, args.Ue2, args.Umu2, args.Utau2,
                             n_pot, pot, bins, spectra, spectra_DV)
+        plot_decay_volume_xy(data, args.mass, f"{args.outdir}/HNL_decay_volume_xy_{args.tag}.pdf")
     else:
         plot_flux_vs_mass(data, n_pot, args.Ue2, args.Umu2, args.Utau2,
                           f"{args.outdir}/HNL_target_flux_vs_mass.pdf", breakdown=args.breakdown)
@@ -911,6 +1054,7 @@ def main():
         write_summary_file(f"{args.outdir}/HNL_summary.txt",
                             args.mass, closest_mass, args.Ue2, args.Umu2, args.Utau2,
                             n_pot, pot, bins, spectra, spectra_DV)
+        plot_decay_volume_xy(data, args.mass, f"{args.outdir}/HNL_decay_volume_xy.pdf")
 
 
 if __name__ == "__main__":
