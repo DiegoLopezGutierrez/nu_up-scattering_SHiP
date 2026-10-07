@@ -22,6 +22,8 @@ without needing a working ROOT/Cling installation.
 """
 
 import argparse
+import json
+import os
 from zlib import Z_DEFAULT_COMPRESSION, Z_DEFAULT_STRATEGY
 import numpy as np
 import pandas as pd
@@ -838,6 +840,199 @@ def expected_n_events(data: dict, n_pot: float, target_mass: float,
     return closest_mass, n_prod, n_events
 
 
+FLAVOR_PDG = {"e": 11, "mu": 13, "tau": 15}
+FLAVOR_ONEHOT = {"e": (1.0, 0.0, 0.0), "mu": (0.0, 1.0, 0.0), "tau": (0.0, 0.0, 1.0)}
+
+
+def _n_events_vs_u2_curve(data: dict, n_pot: float, mN: float, flavor: str,
+                           pot: float, det_efficiency: float, u2_grid: np.ndarray) -> np.ndarray:
+    """
+    N_events(mN, U_alpha^2) over a whole grid of trial U_alpha^2 values, for
+    pure single-flavor mixing, evaluated efficiently by exploiting that (for
+    a single nonzero mixing angle) every term in Gamma_N is linear in
+    U_alpha^2: production weight, Gamma_N, and therefore the P_decay
+    exponents all scale with u2 given a one-time Gamma_N_per_U2 -- so the
+    per-mass event selection and the Gamma_N/BR_visible calculation are each
+    done once here, not once per trial u2 as a naive loop over
+    expected_n_events would do.
+    """
+    lepton_pdg = FLAVOR_PDG[flavor]
+    onehot = FLAVOR_ONEHOT[flavor]
+
+    in_bin = (data["mN"] == mN) & (np.abs(data["leptonPDG"]) == lepton_pdg)
+    if not np.any(in_bin):
+        return np.zeros_like(u2_grid)
+
+    weight_per_u2 = data["weightPerU2"][in_bin] / n_pot  # BR/U2 per POT, U2 not yet applied
+    vz = data["vz"][in_bin]
+    pz_N = data["pz_N"][in_bin]
+
+    vx_DV, vy_DV, forward_going = _propagate_to_decay_volume(data, in_bin)
+    x_acceptance = X_DECAY_VOLUME > np.abs(vx_DV)
+    y_acceptance = Y_DECAY_VOLUME > np.abs(vy_DV)
+    geom_acceptance = forward_going & x_acceptance & y_acceptance
+    if not np.any(geom_acceptance):
+        return np.zeros_like(u2_grid)
+
+    gamma_per_u2 = total_decay_width(mN, *onehot)  # Gamma_N at U_alpha^2 = 1
+    br_visible = 1.0 - invisible_decay_width(mN, *onehot) / gamma_per_u2  # U2-independent ratio
+
+    mm_to_invGeV = 5.07e12
+    dist_near = (Z_DECAY_VOLUME - vz[geom_acceptance])
+    dist_far = (Z_DECAY_VOLUME + DECAY_VOLUME_LENGTH - vz[geom_acceptance])
+    pz_acc = pz_N[geom_acceptance]
+    w_acc = weight_per_u2[geom_acceptance]
+
+    n_events = np.empty_like(u2_grid)
+    for i, u2 in enumerate(u2_grid):
+        gamma_N = u2 * gamma_per_u2
+        exponent_near = gamma_N * mN * dist_near / pz_acc * mm_to_invGeV
+        exponent_far = gamma_N * mN * dist_far / pz_acc * mm_to_invGeV
+        p_decay = np.exp(-exponent_near) - np.exp(-exponent_far)
+        n_decaying_per_pot = np.sum(w_acc * u2 * p_decay)
+        n_events[i] = n_decaying_per_pot * br_visible * det_efficiency * pot
+
+    return n_events
+
+
+def _find_sensitivity_boundaries(u2_grid: np.ndarray, n_events_grid: np.ndarray,
+                                  target_n_events: float):
+    """
+    Lower and upper U_alpha^2 roots of N_events(U_alpha^2) == target_n_events
+    on a log-spaced u2_grid, found by log-log linear interpolation between
+    the bracketing grid points of the first rising crossing (lower boundary)
+    and the last falling crossing (upper boundary). Returns (None, None) if
+    N_events never reaches target_n_events anywhere on the grid (i.e. this
+    mass is outside the sensitivity region for any mixing angle).
+    """
+    f = n_events_grid - target_n_events
+    if not np.any(f > 0):
+        return None, None
+
+    log_u2 = np.log10(u2_grid)
+
+    def interp_crossing(i0, i1):
+        # f changes sign between grid indices i0 and i1; interpolate in
+        # log10(u2) vs log10(n_events) space, since n_events spans many
+        # orders of magnitude across the grid.
+        y0, y1 = np.log10(n_events_grid[i0]), np.log10(n_events_grid[i1])
+        x0, x1 = log_u2[i0], log_u2[i1]
+        target = np.log10(target_n_events)
+        x_cross = x0 + (target - y0) * (x1 - x0) / (y1 - y0)
+        return 10 ** x_cross
+
+    sign = np.sign(f)
+    crossing_idx = np.where(np.diff(sign) != 0)[0]
+    rising = [i for i in crossing_idx if f[i] < 0 < f[i + 1] or (f[i] <= 0 and f[i + 1] > 0)]
+    falling = [i for i in crossing_idx if f[i] > 0 > f[i + 1] or (f[i] >= 0 and f[i + 1] < 0)]
+
+    u2_lower = interp_crossing(rising[0], rising[0] + 1) if rising else None
+    u2_upper = interp_crossing(falling[-1], falling[-1] + 1) if falling else None
+    return u2_lower, u2_upper
+
+
+def sensitivity_curve(data: dict, n_pot: float, pot: float, flavor: str,
+                       det_efficiency: float = 1.0, target_n_events: float = 2.3,
+                       u2_bounds=(1e-12, 1.0), n_scan: int = 300):
+    """
+    SHiP 90% CL sensitivity boundary (arXiv:1811.00930 Fig. 3 construction)
+    for pure single-flavor mixing: for each simulated HNL mass, the lower
+    and upper U_alpha^2 roots of N_events(mN, U_alpha^2) = target_n_events
+    (2.3, the paper's stated 90% CL threshold for ~0.1 expected background
+    events). Returns (masses, u2_lower, u2_upper) arrays, NaN where no
+    sensitivity exists at that mass (peak N_events below target_n_events
+    for any mixing angle in u2_bounds).
+    """
+    mass_points = np.unique(data["mN"])
+    u2_grid = np.geomspace(u2_bounds[0], u2_bounds[1], n_scan)
+
+    u2_lower = np.full(mass_points.shape, np.nan)
+    u2_upper = np.full(mass_points.shape, np.nan)
+
+    for i, mN in enumerate(mass_points):
+        n_events_grid = _n_events_vs_u2_curve(data, n_pot, mN, flavor, pot, det_efficiency, u2_grid)
+        lo, hi = _find_sensitivity_boundaries(u2_grid, n_events_grid, target_n_events)
+        if lo is not None:
+            u2_lower[i] = lo
+        if hi is not None:
+            u2_upper[i] = hi
+
+    return mass_points, u2_lower, u2_upper
+
+
+FIGURE3_DIGITIZED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figure3_digitized.json")
+
+
+def load_digitized_figure3(path: str = FIGURE3_DIGITIZED_PATH) -> dict:
+    """
+    Load the pixel-digitized reference curves from Fig. 3 of arXiv:1811.00930
+    (see figure3_digitized.json's "_provenance" entry for the extraction
+    method and caveats -- in particular, the digitized upper boundary is an
+    envelope over both the paper's solid (f(b->Bc)=2.6e-3) and dash-dot
+    (f(b->Bc)=0) curves, not a clean separation of the two).
+    """
+    with open(path) as f:
+        return json.load(f)
+
+
+def plot_sensitivity_curve(data: dict, n_pot: float, pot: float, outfile: str,
+                            det_efficiency: float = 1.0, target_n_events: float = 2.3,
+                            u2_bounds=(1e-12, 1.0), n_scan: int = 300,
+                            overlay_figure3: bool = True) -> None:
+    """
+    Reproduction of Fig. 3 of arXiv:1811.00930: 90% CL sensitivity curves
+    for HNLs mixing to a single SM flavour (e, mu, tau), as closed "cigar"
+    contours in the (m_N, U_alpha^2) plane. See sensitivity_curve for the
+    boundary construction; eps_det is not modeled (flat multiplier, default
+    1.0), and only the charged mesons D+, Ds+, B+, Bc+ feed production (see
+    plot_production_fraction_vs_mass), so this is not expected to land on
+    the paper's absolute scale -- see the known ~260x production-rate
+    normalization gap flagged earlier.
+
+    If overlay_figure3, also draws the pixel-digitized reference curves
+    from the paper's actual Fig. 3 (load_digitized_figure3) as thin dashed
+    lines in the same per-flavor colors, for direct visual comparison.
+    """
+    colors = {"e": "#0C5DA5", "mu": "#FF2C00", "tau": "#00B945"}
+    labels = {"e": r"$\alpha=e$", "mu": r"$\alpha=\mu$", "tau": r"$\alpha=\tau$"}
+
+    fig, ax = plt.subplots(1, 1, figsize=(15, 15), tight_layout=True)
+
+    for flavor in ("e", "mu", "tau"):
+        masses, u2_lower, u2_upper = sensitivity_curve(
+            data, n_pot, pot, flavor, det_efficiency, target_n_events, u2_bounds, n_scan)
+        valid = ~np.isnan(u2_lower) & ~np.isnan(u2_upper)
+        if not np.any(valid):
+            continue
+        ax.fill_between(masses[valid], u2_lower[valid], u2_upper[valid],
+                         color=colors[flavor], alpha=0.25, label=labels[flavor])
+        ax.plot(masses[valid], u2_lower[valid], color=colors[flavor], lw=3)
+        ax.plot(masses[valid], u2_upper[valid], color=colors[flavor], lw=3)
+
+    if overlay_figure3 and os.path.exists(FIGURE3_DIGITIZED_PATH):
+        digitized = load_digitized_figure3()
+        for flavor in ("e", "mu", "tau"):
+            curve = digitized[flavor]
+            m = np.array(curve["mass"])
+            lo = 10 ** np.array(curve["log10_u2_lower"])
+            hi = 10 ** np.array(curve["log10_u2_upper"])
+            ax.plot(m, lo, color=colors[flavor], lw=1.5, ls=":")
+            ax.plot(m, hi, color=colors[flavor], lw=1.5, ls=":")
+        # one dummy handle for the legend, since the per-flavor colors are
+        # already explained by the filled regions above
+        ax.plot([], [], color="black", lw=1.5, ls=":", label="arXiv:1811.00930 Fig. 3 (digitized)")
+
+    ax.set_xlabel(r"HNL mass $M_N$ [GeV]")
+    ax.set_ylabel(r"$U_\alpha^2$")
+    ax.set_yscale("log")
+    ax.set_title(rf"{{\bf SHiP 90\% CL sensitivity}} ($\bar N_{{\rm events}} \geq {target_n_events:g}$)")
+    legend_if_any(ax, loc="upper right")
+    ax.xaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.45)
+    ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.45)
+
+    fig.savefig(outfile, dpi=200)
+
+
 def energy_spectrum_table(data: dict, n_pot: float, target_mass: float,
                            Ue2: float, Umu2: float, Utau2: float):
     """
@@ -1283,6 +1478,8 @@ def main():
                             n_pot, pot, det_efficiency, bins, spectra, spectra_DV)
         plot_decay_volume_xy(data, mass, f"{outdir}/HNL_decay_volume_xy_{tag}.pdf")
         plot_production_fraction_vs_mass(data, n_pot, f"{outdir}/HNL_production_fraction_{tag}.pdf")
+        plot_sensitivity_curve(data, n_pot, pot, f"{outdir}/HNL_sensitivity_{tag}.pdf",
+                               det_efficiency=det_efficiency)
     else:
         plot_flux_vs_mass(data, n_pot, Ue2, Umu2, Utau2,
                           f"{outdir}/HNL_target_flux_vs_mass.pdf", breakdown=breakdown)
@@ -1296,6 +1493,8 @@ def main():
                             n_pot, pot, det_efficiency, bins, spectra, spectra_DV)
         plot_decay_volume_xy(data, mass, f"{outdir}/HNL_decay_volume_xy.pdf")
         plot_production_fraction_vs_mass(data, n_pot, f"{outdir}/HNL_production_fraction.pdf")
+        plot_sensitivity_curve(data, n_pot, pot, f"{outdir}/HNL_sensitivity.pdf",
+                               det_efficiency=det_efficiency)
 
 
 if __name__ == "__main__":
