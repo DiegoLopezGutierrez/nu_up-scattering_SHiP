@@ -22,7 +22,6 @@ without needing a working ROOT/Cling installation.
 """
 
 import argparse
-import json
 import os
 from zlib import Z_DEFAULT_COMPRESSION, Z_DEFAULT_STRATEGY
 import numpy as np
@@ -960,19 +959,76 @@ def sensitivity_curve(data: dict, n_pot: float, pot: float, flavor: str,
     return mass_points, u2_lower, u2_upper
 
 
-FIGURE3_DIGITIZED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figure3_digitized.json")
+FIGURE3_CSV_DIR = os.path.dirname(os.path.abspath(__file__))
+FIGURE3_CSV_VARIANTS = {"with_bc": "withBcproduction", "without_bc": "withoutBcproduction"}
 
 
-def load_digitized_figure3(path: str = FIGURE3_DIGITIZED_PATH) -> dict:
+def _split_cigar_branches(mass: np.ndarray, u2: np.ndarray):
     """
-    Load the pixel-digitized reference curves from Fig. 3 of arXiv:1811.00930
-    (see figure3_digitized.json's "_provenance" entry for the extraction
-    method and caveats -- in particular, the digitized upper boundary is an
-    envelope over both the paper's solid (f(b->Bc)=2.6e-3) and dash-dot
-    (f(b->Bc)=0) curves, not a clean separation of the two).
+    Each SHiP_HNL_<flavor>_mixing_<variant>.csv digitizes a *closed* cigar
+    boundary as two separately-monotonic-in-mass curves (lower and upper)
+    merged together and sorted by mass into one (mass, U2) sequence -- so
+    consecutive rows do not alternate branches in any fixed pattern (confirmed
+    by inspection: splitting by even/odd row or by a fixed mass/value gap
+    both failed on real examples where two consecutive rows belong to the
+    same branch). This disentangles the merge by greedily continuing
+    whichever branch (lower/upper) is closer in log10(U2) to the new point,
+    processing points in mass order; the upper branch is only "started"
+    once a point appears more than a decade above the lower branch's current
+    value (matching the real feature that the upper boundary is absent
+    entirely -- off the top of the original figure -- below some mass).
     """
-    with open(path) as f:
-        return json.load(f)
+    order = np.argsort(mass, kind="stable")
+    mass, u2 = mass[order], u2[order]
+    log_u2 = np.log10(u2)
+
+    lower_m, lower_u2 = [mass[0]], [u2[0]]
+    upper_m, upper_u2 = [], []
+    last_lower, last_upper = log_u2[0], None
+
+    for m, u, lu in zip(mass[1:], u2[1:], log_u2[1:]):
+        if last_upper is None:
+            if lu - last_lower > 1.0:
+                upper_m.append(m); upper_u2.append(u)
+                last_upper = lu
+            else:
+                lower_m.append(m); lower_u2.append(u)
+                last_lower = lu
+        elif abs(lu - last_lower) <= abs(lu - last_upper):
+            lower_m.append(m); lower_u2.append(u)
+            last_lower = lu
+        else:
+            upper_m.append(m); upper_u2.append(u)
+            last_upper = lu
+
+    return ((np.array(lower_m), np.array(lower_u2)),
+            (np.array(upper_m), np.array(upper_u2)))
+
+
+def load_digitized_figure3(csv_dir: str = FIGURE3_CSV_DIR) -> dict:
+    """
+    Load and disentangle the digitized reference curves from Fig. 3 of
+    arXiv:1811.00930, from SHiP_HNL_<flavor>_mixing_<variant>.csv (flavor in
+    e/mu/tau, variant with/without Bc production -- the paper's own solid
+    [f(b->Bc)=2.6e-3] vs. dash-dot [f(b->Bc)=0] curve pair per flavor,
+    kept separate here rather than collapsed into one envelope).
+
+    Returns {flavor: {"with_bc": {mass_lower, u2_lower, mass_upper, u2_upper},
+                       "without_bc": {...}}} for flavor in ("e", "mu", "tau").
+    """
+    result = {}
+    for flavor in ("e", "mu", "tau"):
+        result[flavor] = {}
+        for key, suffix in FIGURE3_CSV_VARIANTS.items():
+            path = os.path.join(csv_dir, f"SHiP_HNL_{flavor}_mixing_{suffix}.csv")
+            raw = np.loadtxt(path, delimiter=",")
+            mass, u2 = raw[:, 0], raw[:, 1]
+            (lm, lu2), (um, uu2) = _split_cigar_branches(mass, u2)
+            result[flavor][key] = {
+                "mass_lower": lm, "u2_lower": lu2,
+                "mass_upper": um, "u2_upper": uu2,
+            }
+    return result
 
 
 def plot_sensitivity_curve(data: dict, n_pot: float, pot: float, outfile: str,
@@ -989,38 +1045,74 @@ def plot_sensitivity_curve(data: dict, n_pot: float, pot: float, outfile: str,
     the paper's absolute scale -- see the known ~260x production-rate
     normalization gap flagged earlier.
 
-    If overlay_figure3, also draws the pixel-digitized reference curves
-    from the paper's actual Fig. 3 (load_digitized_figure3) as thin dashed
-    lines in the same per-flavor colors, for direct visual comparison.
+    If overlay_figure3, also draws the digitized reference curves from the
+    paper's actual Fig. 3 (load_digitized_figure3) as thin lines in the same
+    per-flavor colors -- dotted for the with-Bc-production variant (the
+    paper's solid curve, f(b->Bc)=2.6e-3) and dash-dot for the without-Bc
+    variant (the paper's dash-dot curve, f(b->Bc)=0) -- for direct visual
+    comparison.
+
+    Below a certain mass (set by how steeply Gamma_N falls with M_N), the
+    HNL never becomes short-lived enough to decay before the far edge of
+    the decay volume even at the unphysical U_alpha^2 = 1, so the "too
+    short-lived" upper boundary doesn't exist within u2_bounds -- only the
+    lower (rare-decay) boundary does. Rather than silently dropping these
+    masses, that open-ended region is drawn as a lightly-hatched band
+    running from the lower boundary up to u2_bounds[1], bounded by a
+    dashed (not solid) line on top to mark that the true sensitive region
+    actually extends further (to U_alpha^2 > u2_bounds[1], off-scale/
+    unphysical) rather than closing there.
     """
     colors = {"e": "#0C5DA5", "mu": "#FF2C00", "tau": "#00B945"}
     labels = {"e": r"$\alpha=e$", "mu": r"$\alpha=\mu$", "tau": r"$\alpha=\tau$"}
 
     fig, ax = plt.subplots(1, 1, figsize=(15, 15), tight_layout=True)
 
+    drew_open_ended = False
     for flavor in ("e", "mu", "tau"):
         masses, u2_lower, u2_upper = sensitivity_curve(
             data, n_pot, pot, flavor, det_efficiency, target_n_events, u2_bounds, n_scan)
-        valid = ~np.isnan(u2_lower) & ~np.isnan(u2_upper)
-        if not np.any(valid):
-            continue
-        ax.fill_between(masses[valid], u2_lower[valid], u2_upper[valid],
-                         color=colors[flavor], alpha=0.25, label=labels[flavor])
-        ax.plot(masses[valid], u2_lower[valid], color=colors[flavor], lw=3)
-        ax.plot(masses[valid], u2_upper[valid], color=colors[flavor], lw=3)
+        closed = ~np.isnan(u2_lower) & ~np.isnan(u2_upper)
+        open_ended = ~np.isnan(u2_lower) & np.isnan(u2_upper)
 
-    if overlay_figure3 and os.path.exists(FIGURE3_DIGITIZED_PATH):
+        if np.any(closed):
+            ax.fill_between(masses[closed], u2_lower[closed], u2_upper[closed],
+                             color=colors[flavor], alpha=0.25, label=labels[flavor])
+            ax.plot(masses[closed], u2_lower[closed], color=colors[flavor], lw=3)
+            ax.plot(masses[closed], u2_upper[closed], color=colors[flavor], lw=3)
+
+        if np.any(open_ended):
+            drew_open_ended = True
+            label = labels[flavor] if not np.any(closed) else None
+            ax.fill_between(masses[open_ended], u2_lower[open_ended], u2_bounds[1],
+                             color=colors[flavor], alpha=0.12, hatch="//",
+                             edgecolor=colors[flavor], linewidth=0.0, label=label)
+            ax.plot(masses[open_ended], u2_lower[open_ended], color=colors[flavor], lw=3)
+            ax.plot(masses[open_ended], np.full(np.sum(open_ended), u2_bounds[1]),
+                     color=colors[flavor], lw=1.5, ls="--")
+
+    if drew_open_ended:
+        ax.plot([], [], color="black", lw=1.5, ls="--",
+                 label=rf"sensitive region extends past $U_\alpha^2={u2_bounds[1]:g}$ (off-scale)")
+
+    figure3_csv_paths = [
+        os.path.join(FIGURE3_CSV_DIR, f"SHiP_HNL_{flavor}_mixing_{suffix}.csv")
+        for flavor in ("e", "mu", "tau") for suffix in FIGURE3_CSV_VARIANTS.values()
+    ]
+    if overlay_figure3 and all(os.path.exists(p) for p in figure3_csv_paths):
         digitized = load_digitized_figure3()
+        variant_style = {"with_bc": ":", "without_bc": "-."}
         for flavor in ("e", "mu", "tau"):
-            curve = digitized[flavor]
-            m = np.array(curve["mass"])
-            lo = 10 ** np.array(curve["log10_u2_lower"])
-            hi = 10 ** np.array(curve["log10_u2_upper"])
-            ax.plot(m, lo, color=colors[flavor], lw=1.5, ls=":")
-            ax.plot(m, hi, color=colors[flavor], lw=1.5, ls=":")
-        # one dummy handle for the legend, since the per-flavor colors are
+            for variant, ls in variant_style.items():
+                curve = digitized[flavor][variant]
+                ax.plot(curve["mass_lower"], curve["u2_lower"], color=colors[flavor], lw=1.5, ls=ls)
+                ax.plot(curve["mass_upper"], curve["u2_upper"], color=colors[flavor], lw=1.5, ls=ls)
+        # dummy handles for the legend, since the per-flavor colors are
         # already explained by the filled regions above
-        ax.plot([], [], color="black", lw=1.5, ls=":", label="arXiv:1811.00930 Fig. 3 (digitized)")
+        ax.plot([], [], color="black", lw=1.5, ls=":",
+                 label=r"arXiv:1811.00930 Fig. 3 (digitized, with $b\to B_c$)")
+        ax.plot([], [], color="black", lw=1.5, ls="-.",
+                 label=r"arXiv:1811.00930 Fig. 3 (digitized, without $b\to B_c$)")
 
     ax.set_xlabel(r"HNL mass $M_N$ [GeV]")
     ax.set_ylabel(r"$U_\alpha^2$")
