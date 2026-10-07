@@ -1464,6 +1464,21 @@ def _parse_macro_bool(value: str) -> bool:
     raise ValueError(f"Expected a boolean (true/false/yes/no/1/0), got: {value!r}")
 
 
+def _run_if_missing(outfile: str, remake: bool, fn, *args, **kwargs):
+    """
+    Call fn(*args, **kwargs) (which must save its figure to outfile) unless
+    outfile already exists and remake is False, in which case skip with a
+    notice. Intended for plots that don't depend on the active-sterile
+    mixing pattern (Ue2/Umu2/Utau2) -- plot_production_fraction_vs_mass,
+    plot_decay_volume_xy, plot_sensitivity_curve -- so that runs which only
+    vary the mixing pattern don't needlessly regenerate identical plots.
+    """
+    if not remake and os.path.exists(outfile):
+        print(f"[skip] {outfile} already exists (pass --remake-static-plots to regenerate)")
+        return None
+    return fn(*args, **kwargs)
+
+
 def main():
     # Declared up front: the --decay-volume-* help strings below read the
     # current module-level defaults, and Python requires `global` to appear
@@ -1510,6 +1525,12 @@ def main():
     parser.add_argument("--breakdown", action="store_true", default=argparse.SUPPRESS,
                          help="Plot each parent meson species individually instead of "
                               "the aggregated light (pi/K) / heavy (D/Ds/B/Bc) curves.")
+    parser.add_argument("--remake-static-plots", action="store_true", default=argparse.SUPPRESS,
+                         help="Force regeneration of plots that don't depend on the mixing "
+                              "pattern (production fraction, decay-volume xy, sensitivity "
+                              "curve) even if their output file already exists. By default "
+                              "these are skipped when present, since runs that only vary "
+                              "Ue2/Umu2/Utau2 would otherwise regenerate identical plots.")
     parser.add_argument("--tag", type=str, default=argparse.SUPPRESS, help="Tag to append at end of figure names")
     args = parser.parse_args()
     args_dict = vars(args)
@@ -1539,6 +1560,7 @@ def main():
     det_efficiency = resolve("det_efficiency", float, 1.0)
     outdir = resolve("outdir", str, "../plots")
     breakdown = resolve("breakdown", _parse_macro_bool, False)
+    remake_static = resolve("remake_static_plots", _parse_macro_bool, False)
     tag = resolve("tag", str, None)
 
     # Decay volume geometry is used as module-level constants throughout
@@ -1568,10 +1590,14 @@ def main():
         write_summary_file(f"{outdir}/HNL_summary_{tag}.txt", data,
                             mass, closest_mass, Ue2, Umu2, Utau2,
                             n_pot, pot, det_efficiency, bins, spectra, spectra_DV)
-        plot_decay_volume_xy(data, mass, f"{outdir}/HNL_decay_volume_xy_{tag}.pdf")
-        plot_production_fraction_vs_mass(data, n_pot, f"{outdir}/HNL_production_fraction_{tag}.pdf")
-        plot_sensitivity_curve(data, n_pot, pot, f"{outdir}/HNL_sensitivity_{tag}.pdf",
-                               det_efficiency=det_efficiency)
+        _run_if_missing(f"{outdir}/HNL_decay_volume_xy_{tag}.pdf", remake_static,
+                         plot_decay_volume_xy, data, mass, f"{outdir}/HNL_decay_volume_xy_{tag}.pdf")
+        _run_if_missing(f"{outdir}/HNL_production_fraction_{tag}.pdf", remake_static,
+                         plot_production_fraction_vs_mass, data, n_pot,
+                         f"{outdir}/HNL_production_fraction_{tag}.pdf")
+        _run_if_missing(f"{outdir}/HNL_sensitivity_{tag}.pdf", remake_static,
+                         plot_sensitivity_curve, data, n_pot, pot, f"{outdir}/HNL_sensitivity_{tag}.pdf",
+                         det_efficiency=det_efficiency)
     else:
         plot_flux_vs_mass(data, n_pot, Ue2, Umu2, Utau2,
                           f"{outdir}/HNL_target_flux_vs_mass.pdf", breakdown=breakdown)
@@ -1583,10 +1609,14 @@ def main():
         write_summary_file(f"{outdir}/HNL_summary.txt", data,
                             mass, closest_mass, Ue2, Umu2, Utau2,
                             n_pot, pot, det_efficiency, bins, spectra, spectra_DV)
-        plot_decay_volume_xy(data, mass, f"{outdir}/HNL_decay_volume_xy.pdf")
-        plot_production_fraction_vs_mass(data, n_pot, f"{outdir}/HNL_production_fraction.pdf")
-        plot_sensitivity_curve(data, n_pot, pot, f"{outdir}/HNL_sensitivity.pdf",
-                               det_efficiency=det_efficiency)
+        _run_if_missing(f"{outdir}/HNL_decay_volume_xy.pdf", remake_static,
+                         plot_decay_volume_xy, data, mass, f"{outdir}/HNL_decay_volume_xy.pdf")
+        _run_if_missing(f"{outdir}/HNL_production_fraction.pdf", remake_static,
+                         plot_production_fraction_vs_mass, data, n_pot,
+                         f"{outdir}/HNL_production_fraction.pdf")
+        _run_if_missing(f"{outdir}/HNL_sensitivity.pdf", remake_static,
+                         plot_sensitivity_curve, data, n_pot, pot, f"{outdir}/HNL_sensitivity.pdf",
+                         det_efficiency=det_efficiency)
 
 
 if __name__ == "__main__":
