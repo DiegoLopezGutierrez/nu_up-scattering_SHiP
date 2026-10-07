@@ -104,6 +104,7 @@ HEAVY_PARENTS = (411, 431, 521, 541)
 Z_DECAY_VOLUME = 35e3 # located 35 m downstream from target
 X_DECAY_VOLUME = 2e3 # width of 4 m
 Y_DECAY_VOLUME = 3e3 # height of 6 m
+DECAY_VOLUME_LENGTH = 50e3  # length of the decay volume along z (SHiP: 50 m)
 
 G_F = 1.1663787e-5  # Fermi constant [GeV^-2]
 
@@ -665,6 +666,88 @@ def plot_flux_vs_mass(data: dict, n_pot: float, Ue2: float, Umu2: float, Utau2: 
     fig.savefig(outfile, dpi=100)
 
 
+# Table 1 of arXiv:1811.00930: quark-pair production fraction per inelastic
+# pN collision and the cascade-production enhancement factor, by flavor.
+# Used only to strip the production-rate normalization out of our per-POT
+# flux in plot_production_fraction_vs_mass, below -- NOT used anywhere else
+# in this file, and not a claim that our simulation's own production rate
+# matches these numbers (see that function's docstring).
+PAPER_X_QQBAR = {"charm": 1.7e-3, "beauty": 1.6e-7}
+PAPER_F_CASCADE = {"charm": 2.3, "beauty": 1.7}
+
+
+def plot_production_fraction_vs_mass(data: dict, n_pot: float, outfile: str,
+                                      mass_max_charm: float = 2.0, mass_max_beauty: float = 6.0) -> None:
+    """
+    Reproduction of Fig. 2 of the SHiP sensitivity paper (Collaboration,
+    arXiv:1811.00930): f(h) BR(h -> N+X) vs HNL mass for each parent meson
+    species, with pure electron mixing (Ue2=1, Umu2=Utau2=0) as in that
+    figure, split into a charm-meson panel (left) and beauty-meson panel
+    (right).
+
+    Normalization: table[pdg] from flux_vs_mass_table is a *per-POT flux*
+    -- it includes the full quark-pair production rate (X_qqbar) and
+    cascade enhancement, in addition to fragmentation and the HNL branching
+    ratio. Fig. 2 explicitly does NOT include the production-rate piece:
+    per the paper's eq. (2.2)-(2.3) and the Fig. 2 caption ("production
+    fraction of the meson decaying into HNL" = f(q->h), Table 2 alone),
+    N_prod = N_q * f(q->h) * BR(h->N+X), with N_q = 2*X_qqbar*f_cascade*POT
+    applied *separately* and outside what Fig. 2 plots. So to land in the
+    same convention, our per-POT flux is divided here by 2*X_qqbar*f_cascade
+    (PAPER_X_QQBAR, PAPER_F_CASCADE above, from the paper's own Table 1) to
+    strip the production-rate factor back out.
+
+    Caveat -- this uses the *paper's* assumed production rate, not a
+    verified property of our own simulation: dividing by our own simulated
+    production rate instead (recovered from a single data point via the
+    independently-coded HNLProduction.cc branching-ratio formula) shows our
+    effective per-POT Ds+ yield is ~260x lower than 2*X_qqbar*f_cascade*0.088
+    (Table 1 x Table 2) would predict -- i.e. there is a real, unresolved
+    gap in our simulation's charm/beauty production-rate normalization
+    (not in the HNL branching-ratio formula itself, which checks out
+    numerically against this same Table 2 fragmentation fraction). This
+    plot therefore still will not land on Fig. 2's absolute scale; treat it
+    as "our shape, best-effort rescaled by the paper's assumed production
+    rate," not a validated match.
+
+    Our Geant4/Pythia8 simulation also only tracks the charged mesons D+,
+    Ds+, B+, Bc+ (not the neutral D0, B0, or the vector D*), so this
+    reproduces only the subset of curves in Fig. 2 that our simulation
+    actually produces -- it is not a full reproduction of that figure.
+    """
+    table = flux_vs_mass_table(data, n_pot, Ue2=1.0, Umu2=0.0, Utau2=0.0)
+    mass_points = table.index.to_numpy()
+    mass_max_beauty = min(mass_max_beauty, mass_points.max())
+
+    rescale = {
+        411: 1.0 / (2 * PAPER_X_QQBAR["charm"] * PAPER_F_CASCADE["charm"]),
+        431: 1.0 / (2 * PAPER_X_QQBAR["charm"] * PAPER_F_CASCADE["charm"]),
+        521: 1.0 / (2 * PAPER_X_QQBAR["beauty"] * PAPER_F_CASCADE["beauty"]),
+        541: 1.0 / (2 * PAPER_X_QQBAR["beauty"] * PAPER_F_CASCADE["beauty"]),
+    }
+
+    fig, (ax_charm, ax_beauty) = plt.subplots(1, 2, figsize=(26, 12), tight_layout=True)
+
+    for pdg in (411, 431):
+        add_series(ax_charm, "plot", mass_points, table[pdg].to_numpy() * rescale[pdg], PARENT_LABEL[pdg],
+                   color=PARENT_COLORS[pdg], lw=4)
+    for pdg in (521, 541):
+        add_series(ax_beauty, "plot", mass_points, table[pdg].to_numpy() * rescale[pdg], PARENT_LABEL[pdg],
+                   color=PARENT_COLORS[pdg], lw=4)
+
+    for ax, mass_max, title in ((ax_charm, mass_max_charm, "Charm"), (ax_beauty, mass_max_beauty, "Beauty")):
+        ax.set_xlim(0.0, mass_max)
+        ax.set_yscale("log")
+        ax.set_xlabel(r"$m_{\rm HNL}$ [GeV]")
+        ax.set_ylabel(r"$f(h)\,\mathrm{BR}(h \to X+N)$")
+        ax.set_title(rf"{{\bf {title}}} ($U_e^2=1,\ U_\mu^2=0,\ U_\tau^2=0$) -- rescaled to paper's convention")
+        legend_if_any(ax, loc="upper right")
+        ax.xaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.45)
+        ax.yaxis.grid(True, linestyle="--", which="major", color="grey", alpha=0.45)
+
+    fig.savefig(outfile, dpi=200)
+
+
 def _propagate_to_decay_volume(data: dict, in_bin: np.ndarray):
     """
     Extrapolate each selected HNL's production vertex to the decay-volume
@@ -685,6 +768,74 @@ def _propagate_to_decay_volume(data: dict, in_bin: np.ndarray):
     vx_DV = vx + (Z_DECAY_VOLUME - vz) * px_N / pz_N  # mm
     vy_DV = vy + (Z_DECAY_VOLUME - vz) * py_N / pz_N  # mm
     return vx_DV, vy_DV, forward_going
+
+
+def expected_n_events(data: dict, n_pot: float, target_mass: float,
+                       Ue2: float, Umu2: float, Utau2: float, pot: float,
+                       det_efficiency: float = 1.0):
+    """
+    Expected number of detected HNL events, following arXiv:1811.00930
+    eqs. (2.1), (2.4), (2.5):
+
+        N_events = N_prod * P_decay * BR(N -> visible) * eps_det
+
+    N_prod ("the number of produced HNLs that fly in the direction of the
+    fiducial volume") is taken directly from our own simulated, geometry-
+    accepted flux -- *not* re-derived via the production decomposition of
+    eq. (2.2)-(2.3) (N_q * f(q->h) * BR), since we already have the
+    simulated production rate itself and don't need to reconstruct it from
+    separate quark-production/fragmentation/branching-ratio factors.
+
+    P_decay (eq. 2.5) is the probability of decaying between the decay
+    volume's entrance (Z_DECAY_VOLUME) and exit (Z_DECAY_VOLUME +
+    DECAY_VOLUME_LENGTH) planes, computed per simulated HNL via the same
+    exact exponent derivation used in energy_spectrum_table's survival
+    probability (exponent = Gamma_N * M_N * distance / pz), just evaluated
+    at both boundaries and differenced, rather than only at the entrance.
+
+    BR(N -> visible) = 1 - Gamma_invisible/Gamma_N, using the existing
+    invisible_decay_width/total_decay_width functions.
+
+    eps_det (detection efficiency: track reconstruction + selection) is not
+    modeled here and is fixed at 1.0 by default -- a genuine simplification
+    relative to the paper, which derives it from a dedicated FairShip
+    reconstruction study.
+
+    Returns (closest_mass, n_prod, n_events).
+    """
+    mass_points = np.unique(data["mN"])
+    closest_mass = mass_points[np.argmin(np.abs(mass_points - target_mass))]
+    in_bin = data["mN"] == closest_mass
+
+    weight = data["weightPerU2"][in_bin] * mixing_weight(data["leptonPDG"][in_bin], Ue2, Umu2, Utau2) / n_pot
+    vz = data["vz"][in_bin]  # mm
+    pz_N = data["pz_N"][in_bin]  # GeV
+
+    vx_DV, vy_DV, forward_going = _propagate_to_decay_volume(data, in_bin)
+    x_acceptance = X_DECAY_VOLUME > np.abs(vx_DV)
+    y_acceptance = Y_DECAY_VOLUME > np.abs(vy_DV)
+    geom_acceptance = forward_going & x_acceptance & y_acceptance
+
+    decay_width = total_decay_width(closest_mass, Ue2, Umu2, Utau2)  # GeV
+    mm_to_invGeV = 5.07e12  # 1 mm = 5.07e12 GeV^-1
+
+    p_decay = np.zeros_like(weight)
+    exponent_near = (decay_width * closest_mass * (Z_DECAY_VOLUME - vz[geom_acceptance])
+                      / pz_N[geom_acceptance] * mm_to_invGeV)
+    exponent_far = (decay_width * closest_mass
+                     * (Z_DECAY_VOLUME + DECAY_VOLUME_LENGTH - vz[geom_acceptance])
+                     / pz_N[geom_acceptance] * mm_to_invGeV)
+    p_decay[geom_acceptance] = np.exp(-exponent_near) - np.exp(-exponent_far)
+
+    n_prod_per_pot = np.sum(weight[geom_acceptance])
+    n_decaying_per_pot = np.sum(weight * p_decay)  # p_decay already 0 outside geom_acceptance
+
+    br_visible = 1.0 - invisible_decay_width(closest_mass, Ue2, Umu2, Utau2) / decay_width
+
+    n_prod = n_prod_per_pot * pot
+    n_events = n_decaying_per_pot * br_visible * det_efficiency * pot
+
+    return closest_mass, n_prod, n_events
 
 
 def energy_spectrum_table(data: dict, n_pot: float, target_mass: float,
@@ -924,20 +1075,24 @@ def plot_decay_volume_xy(data: dict, target_mass: float, outfile: str, n_bins: i
     fig.savefig(outfile, dpi=200)
 
 
-def write_summary_file(outfile: str, target_mass: float, closest_mass: float,
+def write_summary_file(outfile: str, data: dict, target_mass: float, closest_mass: float,
                         Ue2: float, Umu2: float, Utau2: float,
-                        n_pot: float, pot: float,
+                        n_pot: float, pot: float, det_efficiency: float,
                         bins: np.ndarray, spectra: dict, spectra_DV: dict) -> None:
     """
     Write a text summary of the run parameters (HNL mass, mixing angles,
     decay volume geometry, POT) and the resulting HNL yields, obtained by
     integrating the differential energy spectra dPhi_N/dE_N (both at the
-    target and at the decay volume) over dE_N.
+    target and at the decay volume) over dE_N, plus the expected number of
+    detected events (arXiv:1811.00930 eqs. 2.1, 2.4, 2.5 -- see
+    expected_n_events).
     """
     bin_widths = np.diff(bins)
     n_per_pot_target = float(np.sum((spectra["light"] + spectra["heavy"]) * bin_widths))
     n_per_pot_DV = float(np.sum((spectra_DV["light"] + spectra_DV["heavy"]) * bin_widths))
     decay_width = total_decay_width(closest_mass, Ue2, Umu2, Utau2)
+    _, n_prod, n_events = expected_n_events(data, n_pot, target_mass, Ue2, Umu2, Utau2, pot, det_efficiency)
+    br_visible = 1.0 - invisible_decay_width(closest_mass, Ue2, Umu2, Utau2) / decay_width
 
     with open(outfile, "w") as f:
         f.write("HNL flux summary\n")
@@ -965,6 +1120,7 @@ def write_summary_file(outfile: str, target_mass: float, closest_mass: float,
         f.write(f"Distance from target [m]: {Z_DECAY_VOLUME / 1e3:.6g}\n")
         f.write(f"Half-width (x) [m]:       {X_DECAY_VOLUME / 1e3:.6g}\n")
         f.write(f"Half-height (y) [m]:      {Y_DECAY_VOLUME / 1e3:.6g}\n")
+        f.write(f"Length [m]:               {DECAY_VOLUME_LENGTH / 1e3:.6g}\n")
         f.write(f"Cross-sectional area [m^2]: {2 * X_DECAY_VOLUME / 1e3 * 2 * Y_DECAY_VOLUME / 1e3:.6g}\n\n")
 
         f.write("Protons on target\n")
@@ -977,84 +1133,169 @@ def write_summary_file(outfile: str, target_mass: float, closest_mass: float,
         f.write(f"Flux at target [N/POT]:        {n_per_pot_target:.6g}\n")
         f.write(f"Flux at decay volume [N/POT]:  {n_per_pot_DV:.6g}\n")
         f.write(f"Total HNLs produced at target for {pot:.6g} POT: {n_per_pot_target * pot:.6g}\n")
-        f.write(f"Total HNLs detected at decay volume for {pot:.6g} POT: {n_per_pot_DV * pot:.6g}\n")
+        f.write(f"Total HNLs detected at decay volume for {pot:.6g} POT: {n_per_pot_DV * pot:.6g}\n\n")
+
+        f.write("Expected number of detected events (eqs. 2.1, 2.4, 2.5 of arXiv:1811.00930)\n")
+        f.write("------------------------------------------------------------------------------\n")
+        f.write("NOTE: Pdet = Pdecay * BR(N->visible) * eps_det, with eps_det (detection/\n")
+        f.write("reconstruction efficiency) fixed at the flat value below -- not yet modeled.\n")
+        f.write(f"Detection efficiency eps_det (flat, not modeled): {det_efficiency:.6g}\n")
+        f.write(f"BR(N -> visible) = 1 - Gamma_invisible/Gamma_N:   {br_visible:.6g}\n")
+        f.write(f"N_prod (produced, geometrically accepted) for {pot:.6g} POT: {n_prod:.6g}\n")
+        f.write(f"N_events (expected detected) for {pot:.6g} POT:             {n_events:.6g}\n")
+
+
+def load_macro_file(path: str) -> dict:
+    """
+    Parse a macro file of 'key = value' lines into a dict of raw string
+    values (blank lines and '#' comments -- full-line or trailing -- are
+    ignored). Keys match the long-form CLI argument names in main() below
+    (e.g. 'mass', 'Umu2', 'decay_volume_half_width'), so a macro file is a
+    saveable, shareable alternative to a long command line: see
+    example_run.mac for a template. Any parameter also given explicitly on
+    the command line overrides the macro file's value for that parameter
+    (see the `resolve` helper in main()).
+    """
+    params = {}
+    with open(path) as f:
+        for lineno, raw_line in enumerate(f, start=1):
+            line = raw_line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            if "=" not in line:
+                raise ValueError(f"{path}:{lineno}: expected 'key = value', got: {raw_line!r}")
+            key, value = line.split("=", 1)
+            params[key.strip()] = value.strip()
+    return params
+
+
+def _parse_macro_bool(value: str) -> bool:
+    if value.strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if value.strip().lower() in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"Expected a boolean (true/false/yes/no/1/0), got: {value!r}")
 
 
 def main():
     # Declared up front: the --decay-volume-* help strings below read the
     # current module-level defaults, and Python requires `global` to appear
     # before any use of the name in this scope.
-    global Z_DECAY_VOLUME, X_DECAY_VOLUME, Y_DECAY_VOLUME
+    global Z_DECAY_VOLUME, X_DECAY_VOLUME, Y_DECAY_VOLUME, DECAY_VOLUME_LENGTH
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default="../geant4/build/HNL_target_flux.root",
+    parser.add_argument("--macro", type=str, default=None,
+                         help="Path to a macro file of 'key = value' lines providing run "
+                              "parameters (see example_run.mac). Any of the flags below, "
+                              "if also given explicitly, overrides that parameter's value "
+                              "from the macro file.")
+    parser.add_argument("--root", default=argparse.SUPPRESS,
                          help="Path to the Geant4 output ROOT file.")
-    parser.add_argument("--npot", default="../geant4/build/n_pot.txt",
+    parser.add_argument("--npot", default=argparse.SUPPRESS,
                          help="Path to the companion protons-on-target count.")
-    parser.add_argument("--mass", type=float, default=1.0,
+    parser.add_argument("--mass", type=float, default=argparse.SUPPRESS,
                          help="HNL mass [GeV] for the energy-spectrum plot "
                               "(snaps to the nearest simulated benchmark mass).")
-    parser.add_argument("--Ue2", type=float, default=0.0, help="|U_e|^2 mixing.")
-    parser.add_argument("--Umu2", type=float, default=1.0, help="|U_mu|^2 mixing.")
-    parser.add_argument("--Utau2", type=float, default=0.0, help="|U_tau|^2 mixing.")
-    parser.add_argument("--pot", type=float, default=None,
+    parser.add_argument("--Ue2", type=float, default=argparse.SUPPRESS, help="|U_e|^2 mixing.")
+    parser.add_argument("--Umu2", type=float, default=argparse.SUPPRESS, help="|U_mu|^2 mixing.")
+    parser.add_argument("--Utau2", type=float, default=argparse.SUPPRESS, help="|U_tau|^2 mixing.")
+    parser.add_argument("--pot", type=float, default=argparse.SUPPRESS,
                          help="Protons-on-target to scale the total HNL yield by "
                               "(defaults to the simulated POT count from --npot, "
                               "i.e. no additional scaling).")
-    parser.add_argument("--decay-volume-z", type=float, default=None,
+    parser.add_argument("--decay-volume-z", type=float, default=argparse.SUPPRESS,
                          help="Distance from the target (z=0) to the decay volume [m] "
                               f"(default: {Z_DECAY_VOLUME / 1e3:g}).")
-    parser.add_argument("--decay-volume-half-width", type=float, default=None,
+    parser.add_argument("--decay-volume-half-width", type=float, default=argparse.SUPPRESS,
                          help="Decay volume half-width in x [m] "
                               f"(default: {X_DECAY_VOLUME / 1e3:g}).")
-    parser.add_argument("--decay-volume-half-height", type=float, default=None,
+    parser.add_argument("--decay-volume-half-height", type=float, default=argparse.SUPPRESS,
                          help="Decay volume half-height in y [m] "
                               f"(default: {Y_DECAY_VOLUME / 1e3:g}).")
-    parser.add_argument("--outdir", default="../plots", help="Output directory for plots.")
-    parser.add_argument("--breakdown", action="store_true",
+    parser.add_argument("--decay-volume-length", type=float, default=argparse.SUPPRESS,
+                         help="Decay volume length along z [m], entrance to exit "
+                              f"(default: {DECAY_VOLUME_LENGTH / 1e3:g}).")
+    parser.add_argument("--det-efficiency", type=float, default=argparse.SUPPRESS,
+                         help="Detection efficiency eps_det (track reconstruction + "
+                              "selection), applied as a flat multiplier to N_events "
+                              "(default: 1.0, i.e. not modeled).")
+    parser.add_argument("--outdir", default=argparse.SUPPRESS, help="Output directory for plots.")
+    parser.add_argument("--breakdown", action="store_true", default=argparse.SUPPRESS,
                          help="Plot each parent meson species individually instead of "
                               "the aggregated light (pi/K) / heavy (D/Ds/B/Bc) curves.")
-    parser.add_argument("--tag", type=str, default=None, help="Tag to append at end of figure names")
+    parser.add_argument("--tag", type=str, default=argparse.SUPPRESS, help="Tag to append at end of figure names")
     args = parser.parse_args()
+    args_dict = vars(args)
+
+    macro = load_macro_file(args.macro) if args.macro else {}
+
+    def resolve(name, cast, default):
+        # CLI (only present if explicitly passed, via default=SUPPRESS)
+        # beats the macro file, which beats the hardcoded default.
+        if name in args_dict:
+            return args_dict[name]
+        if name in macro:
+            return cast(macro[name])
+        return default
+
+    root = resolve("root", str, "../geant4/build/HNL_target_flux.root")
+    npot_path = resolve("npot", str, "../geant4/build/n_pot.txt")
+    mass = resolve("mass", float, 1.0)
+    Ue2 = resolve("Ue2", float, 0.0)
+    Umu2 = resolve("Umu2", float, 1.0)
+    Utau2 = resolve("Utau2", float, 0.0)
+    pot_override = resolve("pot", float, None)
+    dv_z = resolve("decay_volume_z", float, None)
+    dv_half_width = resolve("decay_volume_half_width", float, None)
+    dv_half_height = resolve("decay_volume_half_height", float, None)
+    dv_length = resolve("decay_volume_length", float, None)
+    det_efficiency = resolve("det_efficiency", float, 1.0)
+    outdir = resolve("outdir", str, "../plots")
+    breakdown = resolve("breakdown", _parse_macro_bool, False)
+    tag = resolve("tag", str, None)
 
     # Decay volume geometry is used as module-level constants throughout
     # (energy_spectrum_table, _propagate_to_decay_volume,
     # plot_decay_volume_xy, write_summary_file); override them here, before
-    # any of those run, if the user asked for non-default geometry.
-    if args.decay_volume_z is not None:
-        Z_DECAY_VOLUME = args.decay_volume_z * 1e3
-    if args.decay_volume_half_width is not None:
-        X_DECAY_VOLUME = args.decay_volume_half_width * 1e3
-    if args.decay_volume_half_height is not None:
-        Y_DECAY_VOLUME = args.decay_volume_half_height * 1e3
+    # any of those run, if the macro file/CLI asked for non-default geometry.
+    if dv_z is not None:
+        Z_DECAY_VOLUME = dv_z * 1e3
+    if dv_half_width is not None:
+        X_DECAY_VOLUME = dv_half_width * 1e3
+    if dv_half_height is not None:
+        Y_DECAY_VOLUME = dv_half_height * 1e3
+    if dv_length is not None:
+        DECAY_VOLUME_LENGTH = dv_length * 1e3
 
-    data, n_pot = load_events(args.root, args.npot)
-    pot = args.pot if args.pot is not None else n_pot
+    data, n_pot = load_events(root, npot_path)
+    pot = pot_override if pot_override is not None else n_pot
 
-    if args.tag is not None:
-        plot_flux_vs_mass(data, n_pot, args.Ue2, args.Umu2, args.Utau2,
-                          f"{args.outdir}/HNL_target_flux_vs_mass_{args.tag}.pdf", breakdown=args.breakdown)
+    if tag is not None:
+        plot_flux_vs_mass(data, n_pot, Ue2, Umu2, Utau2,
+                          f"{outdir}/HNL_target_flux_vs_mass_{tag}.pdf", breakdown=breakdown)
         closest_mass, bins, spectra, spectra_DV = plot_energy_spectrum(
-            data, n_pot, args.mass, args.Ue2, args.Umu2, args.Utau2,
-            f"{args.outdir}/HNL_target_energy_spectrum_{args.tag}.pdf",
-            f"{args.outdir}/HNL_decay_volume_energy_spectrum_{args.tag}.pdf",
-            breakdown=args.breakdown)
-        write_summary_file(f"{args.outdir}/HNL_summary_{args.tag}.txt",
-                            args.mass, closest_mass, args.Ue2, args.Umu2, args.Utau2,
-                            n_pot, pot, bins, spectra, spectra_DV)
-        plot_decay_volume_xy(data, args.mass, f"{args.outdir}/HNL_decay_volume_xy_{args.tag}.pdf")
+            data, n_pot, mass, Ue2, Umu2, Utau2,
+            f"{outdir}/HNL_target_energy_spectrum_{tag}.pdf",
+            f"{outdir}/HNL_decay_volume_energy_spectrum_{tag}.pdf",
+            breakdown=breakdown)
+        write_summary_file(f"{outdir}/HNL_summary_{tag}.txt", data,
+                            mass, closest_mass, Ue2, Umu2, Utau2,
+                            n_pot, pot, det_efficiency, bins, spectra, spectra_DV)
+        plot_decay_volume_xy(data, mass, f"{outdir}/HNL_decay_volume_xy_{tag}.pdf")
+        plot_production_fraction_vs_mass(data, n_pot, f"{outdir}/HNL_production_fraction_{tag}.pdf")
     else:
-        plot_flux_vs_mass(data, n_pot, args.Ue2, args.Umu2, args.Utau2,
-                          f"{args.outdir}/HNL_target_flux_vs_mass.pdf", breakdown=args.breakdown)
+        plot_flux_vs_mass(data, n_pot, Ue2, Umu2, Utau2,
+                          f"{outdir}/HNL_target_flux_vs_mass.pdf", breakdown=breakdown)
         closest_mass, bins, spectra, spectra_DV = plot_energy_spectrum(
-            data, n_pot, args.mass, args.Ue2, args.Umu2, args.Utau2,
-            f"{args.outdir}/HNL_target_energy_spectrum.pdf",
-            f"{args.outdir}/HNL_decay_volume_energy_spectrum.pdf",
-            breakdown=args.breakdown)
-        write_summary_file(f"{args.outdir}/HNL_summary.txt",
-                            args.mass, closest_mass, args.Ue2, args.Umu2, args.Utau2,
-                            n_pot, pot, bins, spectra, spectra_DV)
-        plot_decay_volume_xy(data, args.mass, f"{args.outdir}/HNL_decay_volume_xy.pdf")
+            data, n_pot, mass, Ue2, Umu2, Utau2,
+            f"{outdir}/HNL_target_energy_spectrum.pdf",
+            f"{outdir}/HNL_decay_volume_energy_spectrum.pdf",
+            breakdown=breakdown)
+        write_summary_file(f"{outdir}/HNL_summary.txt", data,
+                            mass, closest_mass, Ue2, Umu2, Utau2,
+                            n_pot, pot, det_efficiency, bins, spectra, spectra_DV)
+        plot_decay_volume_xy(data, mass, f"{outdir}/HNL_decay_volume_xy.pdf")
+        plot_production_fraction_vs_mass(data, n_pot, f"{outdir}/HNL_production_fraction.pdf")
 
 
 if __name__ == "__main__":
