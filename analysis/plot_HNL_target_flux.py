@@ -1066,7 +1066,7 @@ def plot_sensitivity_curve(data: dict, n_pot: float, pot: float, outfile: str,
     colors = {"e": "#0C5DA5", "mu": "#FF2C00", "tau": "#00B945"}
     labels = {"e": r"$\alpha=e$", "mu": r"$\alpha=\mu$", "tau": r"$\alpha=\tau$"}
 
-    fig, ax = plt.subplots(1, 1, figsize=(15, 15), tight_layout=True)
+    fig, ax = plt.subplots(1, 1, figsize=(20, 20), tight_layout=True)
 
     drew_open_ended = False
     for flavor in ("e", "mu", "tau"):
@@ -1078,22 +1078,24 @@ def plot_sensitivity_curve(data: dict, n_pot: float, pot: float, outfile: str,
         if np.any(closed):
             ax.fill_between(masses[closed], u2_lower[closed], u2_upper[closed],
                              color=colors[flavor], alpha=0.25, label=labels[flavor])
-            ax.plot(masses[closed], u2_lower[closed], color=colors[flavor], lw=3)
-            ax.plot(masses[closed], u2_upper[closed], color=colors[flavor], lw=3)
+            ax.plot(masses[closed], u2_lower[closed], color=colors[flavor], lw=5)
+            ax.plot(masses[closed], u2_upper[closed], color=colors[flavor], lw=5)
 
         if np.any(open_ended):
             drew_open_ended = True
             label = labels[flavor] if not np.any(closed) else None
             ax.fill_between(masses[open_ended], u2_lower[open_ended], u2_bounds[1],
-                             color=colors[flavor], alpha=0.12, hatch="//",
+                             color=colors[flavor], alpha=0.25, hatch="//",
                              edgecolor=colors[flavor], linewidth=0.0, label=label)
-            ax.plot(masses[open_ended], u2_lower[open_ended], color=colors[flavor], lw=3)
+            ax.plot(masses[open_ended], u2_lower[open_ended], color=colors[flavor], lw=5)
             ax.plot(masses[open_ended], np.full(np.sum(open_ended), u2_bounds[1]),
                      color=colors[flavor], lw=1.5, ls="--")
 
-    if drew_open_ended:
-        ax.plot([], [], color="black", lw=1.5, ls="--",
-                 label=rf"sensitive region extends past $U_\alpha^2={u2_bounds[1]:g}$ (off-scale)")
+    ax.plot([], [], color='black', lw=5, ls="-",
+             label=r"This work")
+    # if drew_open_ended:
+    #     ax.plot([], [], color="black", lw=1.5, ls="--",
+    #              label=rf"sensitive region extends past $U_\alpha^2={u2_bounds[1]:g}$ (off-scale)")
 
     figure3_csv_paths = [
         os.path.join(FIGURE3_CSV_DIR, f"SHiP_HNL_{flavor}_mixing_{suffix}.csv")
@@ -1105,14 +1107,16 @@ def plot_sensitivity_curve(data: dict, n_pot: float, pot: float, outfile: str,
         for flavor in ("e", "mu", "tau"):
             for variant, ls in variant_style.items():
                 curve = digitized[flavor][variant]
-                ax.plot(curve["mass_lower"], curve["u2_lower"], color=colors[flavor], lw=1.5, ls=ls)
-                ax.plot(curve["mass_upper"], curve["u2_upper"], color=colors[flavor], lw=1.5, ls=ls)
+                ax.plot(curve["mass_lower"], curve["u2_lower"], color=colors[flavor], lw=4, ls=ls)
+                ax.plot(curve["mass_upper"], curve["u2_upper"], color=colors[flavor], lw=4, ls=ls)
         # dummy handles for the legend, since the per-flavor colors are
         # already explained by the filled regions above
-        ax.plot([], [], color="black", lw=1.5, ls=":",
-                 label=r"arXiv:1811.00930 Fig. 3 (digitized, with $b\to B_c$)")
-        ax.plot([], [], color="black", lw=1.5, ls="-.",
-                 label=r"arXiv:1811.00930 Fig. 3 (digitized, without $b\to B_c$)")
+        ax.plot([], [], color="black", lw=4, ls=":",
+                 label=r"SHiP (with $b\to B_c$)")
+                #  label=r"arXiv:1811.00930 Fig. 3 (digitized, with $b\to B_c$)")
+        ax.plot([], [], color="black", lw=4, ls="-.",
+                 label=r"SHiP (without $b\to B_c$)")
+                #  label=r"arXiv:1811.00930 Fig. 3 (digitized, without $b\to B_c$)")
 
     ax.set_xlabel(r"HNL mass $M_N$ [GeV]")
     ax.set_ylabel(r"$U_\alpha^2$")
