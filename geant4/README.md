@@ -47,12 +47,13 @@ omit them. Architecture:
   the target and handles the entire light-hadron (pi/K/p/n) cascade exactly
   as it would for any other application -- this is the part Geant4 is good
   at and there was no reason to touch it.
-- **`SteppingAction`** watches every step for a proton/neutron inelastic
+- **`SteppingAction`** watches every step for a p/n/pi+-/K+- inelastic
   vertex (by process name) and, at that vertex's incident lab energy, calls
   **`Pythia8VertexModel`** purely to obtain the charm/beauty content of that
   specific vertex (Geant4's own secondaries for that same vertex are left
   untouched and continue to be tracked normally -- this is a "riding
   alongside" bookkeeping calculation, not a replacement of Geant4's physics).
+  KS/KL-initiated vertices are not modeled (see `PRODUCTION_RATE_GAP.md`).
 - **`TrackingAction`** catches every pi+/-/K+/- track Geant4 creates (any
   generation, from either FTFP_BERT or the Pythia8-driven vertices) for the
   light-meson HNL production channels.
@@ -69,8 +70,10 @@ turned out to have two hard restrictions that are easy to trip over:
    many collision energies cheaply) **only works with SoftQCD processes** --
    Pythia8 aborts if it is combined with explicit hard processes like
    `HardQCD:hardccbar`. So instead of one variable-energy instance, this
-   code keeps a **pool of fully-initialized fixed-energy instances**
-   (400, 250, 150, 100, 60, 35 GeV lab) and picks the nearest one per vertex.
+   code keeps, per beam species, a **pool of fully-initialized fixed-energy
+   instances** (p/n: 74 points, 35-400 GeV lab in 5 GeV steps; pi+-/K+-: a
+   coarser 15-point grid over the same range) and picks the nearest one per
+   vertex.
 2. `SoftQCD:all` and `HardQCD:hardccbar/hardbbbar` **cannot be combined in
    the same instance either** (`"should not combine softQCD processes with
    hard ones"`) -- doing so is numerically unstable (this was found the hard
@@ -80,20 +83,28 @@ turned out to have two hard restrictions that are easy to trip over:
    generated event is guaranteed to contain a c-cbar or b-bbar pair. This is
    turned back into a physical per-vertex rate with an explicit weight
    `sigma(hard)/sigma(inelastic)`, where `sigma(hard)` comes from Pythia8's
-   own `Info::sigmaGen()` (averaged over a 300-event burn-in at construction
-   time) and `sigma(inelastic)` is a fixed ~30 mb approximation (good to
-   ~20% over this energy range -- replace with a proper energy-dependent
-   parameterization if you need better precision). This "biased sampling"
-   approach is also far more statistically efficient than waiting for
-   charm/beauty to spontaneously appear in inclusive minimum-bias events.
+   own `Info::sigmaGen()` (averaged over a 5000-event burn-in at
+   construction time) and `sigma(inelastic) = 10.7 mb` is the nuclear-
+   shadowed per-nucleon cross section inside Mo (see
+   `PRODUCTION_RATE_GAP.md` for provenance and why this isn't the free-proton
+   ~30 mb value), applied to pion/kaon vertices too for lack of a dedicated
+   measurement at this granularity. This "biased sampling" approach is also
+   far more statistically efficient than waiting for charm/beauty to
+   spontaneously appear in inclusive minimum-bias events.
 
-Further approximations (documented in `Pythia8VertexModel.hh`): every
-projectile/target nucleon is treated as a proton (isospin symmetry), and the
+Beam species are canonicalized before pool lookup: p and n share one pool
+(isospin-averaged), as do pi+/pi- and K+/K- (exact QCD charge-conjugation
+invariance -- not an approximation). KS/KL cascade particles are not
+modeled. Each species pool uses FTFT's own K-factor (`K_charm`/`K_beauty`:
+2.48/1.04 for p/n, 2.02/1.19 for pi/K) and, for meson beams, the GRV92 pion
+PDF set. Further approximations (documented in `Pythia8VertexModel.hh`): the
 target nucleus is treated as a free-nucleon gas at rest (no nuclear
-shadowing / Fermi motion / Glauber multi-nucleon treatment). Below the
-lowest pool energy (35 GeV lab), the charm/beauty yield is treated as zero
-(genuinely negligible there, and too close to the ccbar threshold for
-Pythia8's sampler to handle reliably).
+shadowing beyond the `sigma(inelastic)` normalization / Fermi motion /
+Glauber multi-nucleon treatment). Below the lowest pool energy (35 GeV lab),
+the charm/beauty yield is treated as zero (genuinely negligible there, and
+too close to the ccbar threshold for Pythia8's sampler to handle reliably).
+See `PRODUCTION_RATE_GAP.md` for the full normalization investigation,
+including the still-open ~12x gap vs. arXiv:1811.00930.
 
 ## Scope / limitations
 
